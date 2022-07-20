@@ -11,11 +11,11 @@ try:
     from graph_util import get_incoming_connections, feed_forward_layers
     from graph_util import hsv2rgb
 except ModuleNotFoundError:
-    from activation_functions import identity
-    from graph_util import get_matching_connections, find_node_with_id
-    from graph_util import name_to_fn, choose_random_function, is_valid_connection
-    from graph_util import get_incoming_connections, feed_forward_layers
-    from graph_util import hsv2rgb
+    from cppn_neat.activation_functions import identity
+    from cppn_neat.graph_util import get_matching_connections, find_node_with_id
+    from cppn_neat.graph_util import name_to_fn, choose_random_function, is_valid_connection
+    from cppn_neat.graph_util import get_incoming_connections, feed_forward_layers
+    from cppn_neat.graph_util import hsv2rgb
 
 class NodeType(IntEnum):
     """Enum for the type of node."""
