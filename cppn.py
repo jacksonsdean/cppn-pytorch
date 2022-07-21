@@ -198,6 +198,8 @@ class CPPN():
         self.node_genome = []  # inputs first, then outputs, then hidden
         self.connection_genome = []
         self.selected = False
+        
+        torch.manual_seed(config.seed)
 
         self.n_inputs = 2 # x, y
         if config.use_radial_distance:
@@ -414,13 +416,13 @@ class CPPN():
         # the new node and the last node in the chain
         # is given the same weight as the connection being split
         self.connection_genome.append(Connection(
-            self.node_genome[old_connection.from_node.id],
-            self.node_genome[new_node.id],
+            find_node_with_id(self.node_genome, old_connection.from_node.id),
+            find_node_with_id(self.node_genome, new_node.id),
             1.0))
 
         self.connection_genome.append(Connection(
-            self.node_genome[new_node.id],
-            self.node_genome[old_connection.to_node.id],
+            find_node_with_id(self.node_genome, new_node.id),
+            find_node_with_id(self.node_genome, old_connection.to_node.id),
             old_connection.weight))
 
 
