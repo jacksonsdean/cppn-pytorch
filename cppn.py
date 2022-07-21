@@ -199,7 +199,7 @@ class CPPN():
         self.connection_genome = []
         self.selected = False
         
-        torch.seed(config.seed)
+        torch.manual_seed(config.seed)
 
         self.n_inputs = 2 # x, y
         if config.use_radial_distance:
