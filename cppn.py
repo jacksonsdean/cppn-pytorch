@@ -3,7 +3,8 @@ import copy
 from enum import IntEnum
 import math
 import json
-import numpy as np
+# import numpy as np
+import torch
 try:
     from activation_functions import identity
     from graph_util import name_to_fn, choose_random_function, is_valid_connection
@@ -16,6 +17,20 @@ except ModuleNotFoundError:
     from cppn_neat.graph_util import name_to_fn, choose_random_function, is_valid_connection
     from cppn_neat.graph_util import get_incoming_connections, feed_forward_layers
     from cppn_neat.graph_util import hsv2rgb
+
+
+def random_uniform(low=0.0, high=1.0, device='cpu'):
+    return torch.rand(1, device=device)[0] * (high - low) + low
+
+def random_choice(choices, count, replace):
+    if not replace:
+        indxs = torch.randperm(len(choices))[:count]
+        output = []
+        for i in indxs:
+            output.append(choices[i])
+        return output
+    else:
+        return choices[torch.randint(0, len(choices), (count,), device=choices.device)]
 
 class NodeType(IntEnum):
     """Enum for the type of node."""
@@ -65,8 +80,8 @@ class Node:
         self.type = int(self.type)
         self.id = int(self.id)
         self.layer = int(self.id)
-        self.sum_inputs = np.array([]).tolist()
-        self.outputs = np.array([]).tolist()
+        self.sum_inputs = []
+        self.outputs = []
         try:
             self.activation = self.activation.__name__
         except AttributeError:
@@ -150,17 +165,17 @@ class Connection:
 class CPPN():
     """A CPPN Object with Nodes and Connections."""
 
-    pixel_inputs = np.zeros((0, 0, 0)) # (res_h, res_w, n_inputs)
+    pixel_inputs = torch.zeros((0, 0, 0)) # (res_h, res_w, n_inputs)
     @staticmethod
-    def initialize_inputs(res_h, res_w, use_radial_dist, use_bias, n_inputs):
+    def initialize_inputs(res_h, res_w, use_radial_dist, use_bias, n_inputs,device ):
         """Initializes the pixel inputs."""
 
         # Pixel coordinates are linear from -.5 to .5
-        x_vals = np.linspace(-.5, .5, res_w)
-        y_vals = np.linspace(-.5, .5, res_h)
+        x_vals = torch.linspace(-.5, .5, res_w, device=device)
+        y_vals = torch.linspace(-.5, .5, res_h, device=device)
 
         # initialize to 0s
-        CPPN.pixel_inputs = np.zeros((res_h, res_w, n_inputs))
+        CPPN.pixel_inputs = torch.zeros((res_h, res_w, n_inputs), device=device)
 
         # assign values:
         for y in range(res_h):
@@ -171,14 +186,20 @@ class CPPN():
                     this_pixel.append(math.sqrt(y_vals[y]**2 + x_vals[x]**2))
                 if use_bias:
                     this_pixel.append(1.0) # bias = 1.0
-                CPPN.pixel_inputs[y][x] = this_pixel
+                CPPN.pixel_inputs[y][x] = torch.tensor(this_pixel, device=device)
 
-    def __init__(self, config, nodes = None, connections = None) -> None:
+    def __init__(self, config, nodes = None, connections = None, device=None) -> None:
+        self.device = device
+        if self.device is None:
+            # no device specified, try to use GPU
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.config = config
         self.image = None
         self.node_genome = []  # inputs first, then outputs, then hidden
         self.connection_genome = []
         self.selected = False
+        
+        torch.seed(config.seed)
 
         self.n_inputs = 2 # x, y
         if config.use_radial_distance:
@@ -209,7 +230,7 @@ class CPPN():
                     new_cx = Connection(
                         from_node, to_node, self.random_weight())
                     self.connection_genome.append(new_cx)
-                    if np.random.rand() > self.config.init_connection_probability:
+                    if torch.rand(1)[0] > self.config.init_connection_probability:
                         new_cx.enabled = False
 
     def initialize_node_genome(self):
@@ -261,7 +282,8 @@ class CPPN():
         CPPN.initialize_inputs(self.config.res_h, self.config.res_w,
                 self.config.use_radial_distance,
                 self.config.use_input_bias,
-                self.n_inputs)
+                self.n_inputs,
+                self.device)
 
     @staticmethod
     def create_from_json(json_dict, config):
@@ -272,7 +294,7 @@ class CPPN():
 
     def random_weight(self):
         """Returns a random weight between -max_weight and max_weight."""
-        return np.random.uniform(-self.config.max_weight, self.config.max_weight)
+        return random_uniform(-self.config.max_weight, self.config.max_weight, self.device)
 
     def get_new_node_id(self):
         """Returns a new node id."""
@@ -295,7 +317,7 @@ class CPPN():
         if self.config.allow_input_activation_mutation:
             eligible_nodes.extend(self.input_nodes())
         for node in eligible_nodes:
-            if np.random.uniform(0,1) < self.config.prob_mutate_activation:
+            if random_uniform(0,1) < self.config.prob_mutate_activation:
                 node.activation = choose_random_function(self.config)
 
     def mutate_weights(self):
@@ -305,23 +327,23 @@ class CPPN():
         positive and negative values """
 
         for connection in self.connection_genome:
-            if np.random.uniform(0, 1) < self.config.prob_mutate_weight:
-                connection.weight += np.random.uniform(-self.config.weight_mutation_max,
-                                               self.config.weight_mutation_max)
-            elif np.random.uniform(0, 1) < self.config.prob_weight_reinit:
+            if random_uniform(0, 1) < self.config.prob_mutate_weight:
+                connection.weight += random_uniform(-self.config.weight_mutation_max,
+                                               self.config.weight_mutation_max, device=self.device)
+            elif random_uniform(0, 1) < self.config.prob_weight_reinit:
                 connection.weight = self.random_weight()
 
         self.clamp_weights()
 
     def mutate(self):
         """Mutates the CPPN based on its config."""
-        if np.random.uniform(0,1) < self.config.prob_add_node:
+        if random_uniform(0,1) < self.config.prob_add_node:
             self.add_node()
-        if np.random.uniform(0,1) < self.config.prob_remove_node:
+        if random_uniform(0,1) < self.config.prob_remove_node:
             self.remove_node()
-        if np.random.uniform(0,1) < self.config.prob_add_connection:
+        if random_uniform(0,1) < self.config.prob_add_connection:
             self.add_connection()
-        if np.random.uniform(0,1) < self.config.prob_disable_connection:
+        if random_uniform(0,1) < self.config.prob_disable_connection:
             self.disable_connection()
 
         self.mutate_activations()
@@ -340,7 +362,7 @@ class CPPN():
     def add_connection(self):
         """Adds a connection to the CPPN."""
         for _ in range(20):  # try 20 times max
-            [from_node, to_node] = np.random.choice(
+            [from_node, to_node] = random_choice(
                 self.node_genome, 2, replace=False)
 
             # look to see if this connection already exists
@@ -352,7 +374,7 @@ class CPPN():
             # if it does exist and it is disabled, there is a chance to reenable
             if existing_cx is not None:
                 if not existing_cx.enabled:
-                    if np.random.rand() < self.config.prob_reenable_connection:
+                    if random_uniform() < self.config.prob_reenable_connection:
                         existing_cx.enabled = True # re-enable the connection
                 break  # don't allow duplicates, don't enable more than one connection
 
@@ -379,7 +401,7 @@ class CPPN():
             return # there are no eligible connections, don't add a node
 
         # choose a random eligible connection
-        old_connection = np.random.choice(eligible_cxs)
+        old_connection = random_choice(eligible_cxs,1,replace=False)[0]
 
         # create the new node
         new_node = Node(choose_random_function(self.config),
@@ -394,13 +416,13 @@ class CPPN():
         # the new node and the last node in the chain
         # is given the same weight as the connection being split
         self.connection_genome.append(Connection(
-            self.node_genome[old_connection.from_node.id],
-            self.node_genome[new_node.id],
+            find_node_with_id(self.node_genome, old_connection.from_node.id),
+            find_node_with_id(self.node_genome, new_node.id),
             1.0))
 
         self.connection_genome.append(Connection(
-            self.node_genome[new_node.id],
-            self.node_genome[old_connection.to_node.id],
+            find_node_with_id(self.node_genome, new_node.id),
+            find_node_with_id(self.node_genome, old_connection.to_node.id),
             old_connection.weight))
 
 
@@ -416,7 +438,7 @@ class CPPN():
             return # no eligible nodes, don't remove a node
 
         # choose a random node
-        node_id_to_remove = np.random.choice([n.id for n in hidden], 1)[0]
+        node_id_to_remove = random_choice([n.id for n in hidden], 1, False)[0]
 
         for cx in self.connection_genome[::-1]:
             if node_id_to_remove in [cx.from_node.id, cx.to_node.id]:
@@ -434,7 +456,7 @@ class CPPN():
         eligible_cxs = list(self.enabled_connections())
         if len(eligible_cxs) < 1:
             return
-        cx = np.random.choice(eligible_cxs)
+        cx = random_choice(eligible_cxs, 1, False)[0]
         cx.enabled = False
 
     def update_node_layers(self) -> int:
@@ -502,8 +524,8 @@ class CPPN():
     def reset_activations(self):
         """Resets all node activations to zero."""
         for node in self.node_genome:
-            node.sum_inputs = np.ones((self.config.res_h, self.config.res_w))/2.0
-            node.outputs = np.ones((self.config.res_h, self.config.res_w))/2.0
+            node.sum_inputs = torch.ones((self.config.res_h, self.config.res_w), device=self.device)/2.0
+            node.outputs = torch.ones((self.config.res_h, self.config.res_w), device=self.device)/2.0
 
     def eval(self, inputs):
         """Evaluates the CPPN."""
@@ -555,7 +577,7 @@ class CPPN():
         # decide if we need to recalculate the image
         recalculate = False
         recalculate = recalculate or force_recalculate
-        if isinstance(self.image, np.ndarray):
+        if isinstance(self.image, torch.Tensor):
             recalculate = recalculate or self.config.res_h == self.image.shape[0]
             recalculate = recalculate or self.config.res_w == self.image.shape[1]
         else:
@@ -580,14 +602,14 @@ class CPPN():
         network has recurrent connections."""
         res_h, res_w = self.config.res_h, self.config.res_w
         pixels = []
-        for x in np.linspace(-.5, .5, res_w):
-            for y in np.linspace(-.5, .5, res_h):
+        for x in torch.linspace(-.5, .5, res_w,device=self.device):
+            for y in torch.linspace(-.5, .5, res_h,device=self.device):
                 outputs = self.eval([x, y])
                 pixels.extend(outputs)
         if len(self.config.color_mode)>2:
-            pixels = np.reshape(pixels, (res_w, res_h, self.n_outputs))
+            pixels = torch.reshape(pixels, (res_w, res_h, self.n_outputs))
         else:
-            pixels = np.reshape(pixels, (res_w, res_h))
+            pixels = torch.reshape(pixels, (res_w, res_h))
 
         self.image = pixels
         return pixels
@@ -600,7 +622,8 @@ class CPPN():
             CPPN.initialize_inputs(res_h, res_w,
                 self.config.use_radial_distance,
                 self.config.use_input_bias,
-                self.n_inputs)
+                self.n_inputs,
+                self.device)
 
         # reset the activations to 0 before evaluating
         self.reset_activations()
@@ -621,20 +644,20 @@ class CPPN():
                 if node.type == NodeType.INPUT:
                     starting_input = CPPN.pixel_inputs[:,:,node_index]
                 else:
-                    starting_input = np.zeros((res_h, res_w))
+                    starting_input = torch.zeros((res_h, res_w),device=self.device)
 
                 node.initialize_sum(starting_input)
                 # initialize the sum_inputs for this node
                 node.activate(node_inputs)
 
         # collect outputs from the last layer
-        outputs = np.array([np.array(node.outputs) for node in self.output_nodes()])
+        outputs = torch.stack([node.outputs for node in self.output_nodes()])
 
         # reshape the outputs to image shape
         if len(self.config.color_mode)>2:
-            outputs =  np.array(outputs).transpose(1, 2, 0) # move color axis to end
+            outputs =  outputs.permute(1, 2, 0) # move color axis to end
         else:
-            outputs = np.reshape(outputs, (res_h, res_w))
+            outputs = torch.reshape(outputs, (res_h, res_w))
 
         self.image = outputs
 
@@ -644,9 +667,9 @@ class CPPN():
 
     def normalize_image(self):
         """Normalize from -1 through 1 to 0 through 255 and convert to ints"""
-        self.image = 1.0 - np.abs(self.image)
-        max_value = np.max(self.image)
-        min_value = np.min(self.image)
+        self.image = 1.0 - torch.abs(self.image)
+        max_value = torch.max(self.image)
+        min_value = torch.min(self.image)
         image_range = max_value - min_value
         self.image -= min_value
         if self.config.color_mode == 'HSL':
@@ -654,7 +677,7 @@ class CPPN():
         self.image *= 255
         if image_range != 0: # prevent divide by 0
             self.image /= image_range
-        self.image = self.image.astype(np.uint8)
+        self.image = self.image.to(dtype=torch.uint8)
 
     def crossover(self, other_parent):
         """Crossover with another CPPN using the method in Stanley and Miikkulainen (2007)."""
@@ -675,7 +698,7 @@ class CPPN():
                 match_1.innovation)]
 
             # Matching genes are inherited randomly
-            inherit_from_parent_1 = np.random.rand() < .5
+            inherit_from_parent_1 = random_uniform() < .5
             if inherit_from_parent_1:
                 child_cx.weight = match_1.weight
                 new_from = copy.deepcopy(match_1.from_node)
@@ -704,7 +727,7 @@ class CPPN():
                 child.connection_genome.remove(child_cx)
 
             if(not match_1.enabled or not match_2.enabled):
-                if np.random.rand() < 0.75:  # 0.75 from Stanley/Miikulainen 2007
+                if random_uniform() < 0.75:  # 0.75 from Stanley/Miikulainen 2007
                     child_cx.enabled = False
 
         child.update_node_layers()

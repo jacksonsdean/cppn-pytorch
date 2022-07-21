@@ -1,6 +1,6 @@
 """Stores configuration parameters for the CPPN."""
 import json
-from random import random
+import random
 
 try:
     from activation_functions import get_all
@@ -16,6 +16,7 @@ class   Config:
         # Initialize to default values
         # These are only used if the frontend client doesn't override them
         self.population_size = 10
+        self.num_generations = 1000
         self.res_w = 28
         self.res_h = 28
         self.save_w = 512
@@ -31,8 +32,9 @@ class   Config:
         self.prob_reenable_connection = 0.1
         self.init_connection_probability = 1
         self.activations = get_all()
-        self.seed = random() * 10000
+        self.seed = random.randint(0, 100000)
         self.prob_crossover = .25
+        
 
         """DGNA: the probability of adding a node is 0.5 and the
         probability of adding a connection is 0.4.
@@ -87,6 +89,12 @@ class   Config:
         for key, value in json_dict.items():
             setattr(self, key, value)
         self.strings_to_fns()
+        
+    def save(self, filename):
+        """Saves the configuration to a file."""
+        with open(filename, "w") as f:
+            f.write(self.to_json())
+            f.close()
 
     @staticmethod
     def create_from_json(json_str):
