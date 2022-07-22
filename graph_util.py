@@ -2,6 +2,7 @@
 import inspect
 import random
 import sys
+from typing import Callable
 
 import numpy as np
 try:
@@ -37,6 +38,8 @@ def name_to_fn(name) -> callable:
     returns:
         The function.
     """
+    if isinstance(name, (Callable,)) or name is None:
+        return name
     assert isinstance(name, str), f"name must be a string but is {type(name)}"
     if name == "":
         return None

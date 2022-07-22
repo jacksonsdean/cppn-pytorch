@@ -60,17 +60,23 @@ class   Config:
         # https://link.springer.com/content/pdf/10.1007/s10710-007-9028-8.pdf page 148
         self.use_input_bias = True # SNGA,
         self.use_radial_distance = True # bias towards radial symmetry
-
+        
+    def serialize(self):
+        self.fns_to_strings()
+        
+    def deserialize(self):
+        self.strings_to_fns()
 
     def fns_to_strings(self):
         """Converts the activation functions to strings."""
-        self.activations= [fn.__name__ for fn in self.activations]
+        self.activations= [fn.__name__ if not isinstance(fn, str) else fn for fn in self.activations]
         self.output_activation = self.output_activation.__name__ if\
             self.output_activation is not None else ""
-
+    
+    
     def strings_to_fns(self):
         """Converts the activation functions to functions."""
-        self.activations= [name_to_fn(name) for name in self.activations]
+        self.activations= [name_to_fn(name) if isinstance(name, str) else name for name in self.activations ]
         self.output_activation = name_to_fn(self.output_activation)
 
     def to_json(self):
