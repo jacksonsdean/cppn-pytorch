@@ -61,13 +61,18 @@ class   Config:
         self.use_input_bias = True # SNGA,
         self.use_radial_distance = True # bias towards radial symmetry
 
-
     def fns_to_strings(self):
         """Converts the activation functions to strings."""
         self.activations= [fn.__name__ for fn in self.activations]
         self.output_activation = self.output_activation.__name__ if\
             self.output_activation is not None else ""
-
+    
+    def serialize(self):
+        self.fns_to_strings()
+        
+    def deserialize(self):
+        self.strings_to_fns()
+    
     def strings_to_fns(self):
         """Converts the activation functions to functions."""
         self.activations= [name_to_fn(name) for name in self.activations]
