@@ -267,7 +267,8 @@ class CPPN():
         del CPPN.pixel_inputs
         CPPN.pixel_inputs = None
         if self.image is not None:
-            self.image = self.image.cpu().numpy().tolist()
+            self.image = self.image.cpu().numpy().tolist() if\
+                isinstance(self.image, torch.Tensor) else self.image
         for node in self.node_genome:
             node.serialize()
         for connection in self.connection_genome:
