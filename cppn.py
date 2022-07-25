@@ -299,9 +299,11 @@ class CPPN():
         for key, value in json_dict.items():
             setattr(self, key, value)
         for i, cx in enumerate(self.connection_genome):
-            self.connection_genome[i] = Connection.create_from_json(cx)
+            self.connection_genome[i] = Connection.create_from_json(cx) if\
+                isinstance(cx, dict) else cx
         for i, n in enumerate(self.node_genome):
-            self.node_genome[i] = Node.create_from_json(n)
+            self.node_genome[i] = Node.create_from_json(n) if\
+                isinstance(n, dict) else n
 
         for cx in self.connection_genome:
             cx.from_node = find_node_with_id(self.node_genome, cx.from_node.id)
