@@ -38,7 +38,6 @@ class NodeType(IntEnum):
     OUTPUT = 1
     HIDDEN = 2
 
-
 class Node:
     """Represents a node in the CPPN."""
 
@@ -75,17 +74,28 @@ class Node:
         """Activates the node."""
         self.sum_inputs = initial_sum
 
-    def to_json(self):
-        """Converts the node to a json string."""
-        self.type = int(self.type)
+    def serialize(self):
+        """Makes the node serializable."""
+        self.type = self.type.value if isinstance(self.type, NodeType) else self.type
         self.id = int(self.id)
         self.layer = int(self.id)
-        self.sum_inputs = []
-        self.outputs = []
+        self.sum_inputs = None
+        self.outputs = None
         try:
             self.activation = self.activation.__name__
         except AttributeError:
             pass
+    
+    def deserialize(self):
+        """Makes the node functional"""
+        self.sum_inputs = None
+        self.sum_inputs = None
+        self.activation = name_to_fn(self.activation) if isinstance(self.activation, str) else self.activation
+        self.type = NodeType(self.type)
+
+    def to_json(self):
+        """Converts the node to a json string."""
+        self.serialize()
         return json.dumps(self.__dict__)
 
     def from_json(self, json_dict):
@@ -93,10 +103,7 @@ class Node:
         if isinstance(json_dict, str):
             json_dict = json.loads(json_dict, strict=False)
         self.__dict__ = json_dict
-        self.type = NodeType(self.type)
-        self.activation = name_to_fn(self.activation)
-        self.outputs = None
-        self.sum_inputs = None
+        self.deserialize()
         return self
 
 class Connection:
@@ -128,6 +135,11 @@ class Connection:
         self.enabled = enabled
         self.is_recurrent = to_node.layer < from_node.layer
 
+    def serialize(self):
+        self.weight = float(self.weight)
+    def deserialize(self):
+        pass
+    
     def to_json(self):
         """Converts the connection to a json string."""
         self.innovation = int(self.innovation)
@@ -250,13 +262,30 @@ class CPPN():
         for _ in range(self.n_inputs + self.n_outputs, total_node_count):
             self.node_genome.append(Node(choose_random_function(self.config), NodeType.HIDDEN,
                 self.get_new_node_id(), 1))
+    
+    def serialize(self):
+        del CPPN.pixel_inputs
+        CPPN.pixel_inputs = None
+        if self.image is not None:
+            self.image = self.image.cpu().numpy().tolist() if\
+                isinstance(self.image, torch.Tensor) else self.image
+        for node in self.node_genome:
+            node.serialize()
+        for connection in self.connection_genome:
+            connection.serialize()
+        self.config.serialize()
 
+    def deserialize(self):
+        for node in self.node_genome:
+            node.deserialize()
+        for connection in self.connection_genome:
+            connection.deserialize()
+        self.config.deserialize()
+        
     def to_json(self):
-        """Converts the CPPN to a json string."""
-        img = self.image
-        if img is not None:
-            img = list(img)
-            img = json.dumps(img)
+        """Converts the CPPN to a json dict."""
+        self.serialize()
+        img = json.dumps(self.image) if self.image is not None else None
         # make copies to keep the CPPN intact
         copy_of_nodes = copy.deepcopy(self.node_genome)
         copy_of_connections = copy.deepcopy(self.connection_genome)
