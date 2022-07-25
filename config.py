@@ -76,7 +76,6 @@ class   Config:
         else:
             self.output_activation = self.output_activation.__name__ if\
                 not isinstance(self.output_activation, str) else self.output_activation
-        
     
     def strings_to_fns(self):
         """Converts the activation functions to functions."""
