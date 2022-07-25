@@ -3,6 +3,7 @@ import copy
 from enum import IntEnum
 import math
 import json
+from typing import Callable
 # import numpy as np
 import torch
 try:
@@ -67,7 +68,7 @@ class Node:
             if cx.from_node.outputs is not None:
                 inputs = cx.from_node.outputs * cx.weight
                 self.sum_inputs = self.sum_inputs + inputs
-
+        
         self.outputs = self.activation(self.sum_inputs)  # apply activation
 
     def initialize_sum(self, initial_sum):
@@ -104,6 +105,7 @@ class Node:
             json_dict = json.loads(json_dict, strict=False)
         self.__dict__ = json_dict
         self.deserialize()
+        assert isinstance(self.activation, Callable), "activation function is not a function"
         return self
 
 class Connection:
@@ -298,13 +300,23 @@ class CPPN():
             json_dict = json.loads(json_dict, strict=False)
         for key, value in json_dict.items():
             setattr(self, key, value)
+       
+       # connections
         for i, cx in enumerate(self.connection_genome):
             self.connection_genome[i] = Connection.create_from_json(cx) if\
-                isinstance(cx, dict) else cx
+                isinstance(cx, (dict,str)) else cx
+            assert isinstance(self.connection_genome[i], Connection),\
+                f"Connection is a {type(self.connection_genome[i])}: {self.connection_genome[i]}"
+       
+       # nodes
         for i, n in enumerate(self.node_genome):
             self.node_genome[i] = Node.create_from_json(n) if\
-                isinstance(n, dict) else n
+                isinstance(n, (dict,str)) else n
 
+            assert isinstance(self.node_genome[i], Node),\
+                f"Node is a {type(self.node_genome[i])}: {self.node_genome[i]}"
+        
+        # make sure references are correct
         for cx in self.connection_genome:
             cx.from_node = find_node_with_id(self.node_genome, cx.from_node.id)
             cx.to_node = find_node_with_id(self.node_genome, cx.to_node.id)
