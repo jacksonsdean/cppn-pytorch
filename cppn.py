@@ -352,7 +352,7 @@ class CPPN():
             if connection.enabled:
                 yield connection
 
-    def mutate_activations(self):
+    def mutate_activations(self, prob):
         """Mutates the activation functions of the nodes."""
         eligible_nodes = list(self.hidden_nodes())
         if self.config.output_activation is None:
@@ -363,14 +363,14 @@ class CPPN():
             if random_uniform(0,1) < self.config.prob_mutate_activation:
                 node.activation = choose_random_function(self.config)
 
-    def mutate_weights(self):
+    def mutate_weights(self, prob):
         """
         Each connection weight is perturbed with a fixed probability by
         adding a floating point number chosen from a uniform distribution of
         positive and negative values """
 
         for connection in self.connection_genome:
-            if random_uniform(0, 1) < self.config.prob_mutate_weight:
+            if random_uniform(0, 1) < prob:
                 connection.weight += random_uniform(-self.config.weight_mutation_max,
                                                self.config.weight_mutation_max, device=self.device)
             elif random_uniform(0, 1) < self.config.prob_weight_reinit:
@@ -378,19 +378,30 @@ class CPPN():
 
         self.clamp_weights()
 
-    def mutate(self):
-        """Mutates the CPPN based on its config."""
-        if random_uniform(0,1) < self.config.prob_add_node:
+    def mutate(self, rates=None):
+        """Mutates the CPPN based on its config or the optionally provided rates."""
+        self.fitness, self.adjusted_fitness = -torch.inf, -torch.inf # new fitnesses after mutation
+        
+        if rates is None:
+            add_node = self.config.prob_add_node
+            add_connection = self.config.prob_add_connection
+            remove_node = self.config.prob_remove_node
+            disable_connection = self.config.prob_disable_connection
+            mutate_weights = self.config.prob_mutate_weights
+            mutate_activations = self.config.prob_mutate_activations
+        else:
+            mutate_activations, mutate_weights, add_connection, add_node, remove_node, disable_connection, weight_mutation_max, prob_reenable_connection = rates
+        if random_uniform(0,1) < add_node:
             self.add_node()
-        if random_uniform(0,1) < self.config.prob_remove_node:
+        if random_uniform(0,1) < remove_node:
             self.remove_node()
-        if random_uniform(0,1) < self.config.prob_add_connection:
+        if random_uniform(0,1) < add_connection:
             self.add_connection()
-        if random_uniform(0,1) < self.config.prob_disable_connection:
+        if random_uniform(0,1) < disable_connection:
             self.disable_connection()
 
-        self.mutate_activations()
-        self.mutate_weights()
+        self.mutate_activations(mutate_activations)
+        self.mutate_weights(mutate_weights)
         self.update_node_layers()
         self.disable_invalid_connections()
 
@@ -400,7 +411,6 @@ class CPPN():
             if connection.enabled:
                 if not is_valid_connection(connection.from_node, connection.to_node, self.config):
                     connection.enabled = False
-
 
     def add_connection(self):
         """Adds a connection to the CPPN."""
