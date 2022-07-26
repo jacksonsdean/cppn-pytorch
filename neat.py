@@ -16,7 +16,7 @@ import platform
 # import constants as c
 
 class NEAT():
-    def __init__(self, config, debug_output=False) -> None:
+    def __init__(self, config, debug_output=False, genome_type=CPPN) -> None:
         self.gen = 0
         self.next_available_id = 0
         self.debug_output = debug_output
@@ -25,12 +25,12 @@ class NEAT():
         Node.current_id =  self.config.num_sensor_neurons + self.config.num_motor_neurons # reset node id counter
         self.show_output = True
         
-        self.diversity_over_time = np.zeros(self.config.num_gens,dtype=float)
-        self.species_over_time = np.zeros(self.config.num_gens,dtype=np.float)
-        self.species_threshold_over_time = np.zeros(self.config.num_gens, dtype=np.float)
-        self.nodes_over_time = np.zeros(self.config.num_gens, dtype=np.float)
-        self.connections_over_time = np.zeros(self.config.num_gens, dtype=np.float)
-        self.fitness_over_time = np.zeros(self.config.num_gens, dtype=np.float)
+        self.diversity_over_time = np.zeros(self.config.num_generations,dtype=float)
+        self.species_over_time = np.zeros(self.config.num_generations,dtype=np.float)
+        self.species_threshold_over_time = np.zeros(self.config.num_generations, dtype=np.float)
+        self.nodes_over_time = np.zeros(self.config.num_generations, dtype=np.float)
+        self.connections_over_time = np.zeros(self.config.num_generations, dtype=np.float)
+        self.fitness_over_time = np.zeros(self.config.num_generations, dtype=np.float)
         self.solutions_over_time = []
         self.species_champs_over_time = []
             
@@ -42,24 +42,25 @@ class NEAT():
         self.solution_fitness = 0
         self.best_brain = None
 
-        # remove temp files:
-        if platform.system() == "Windows":
-            os.system("del brain*.nndf > nul 2> nul")
-            os.system("del body*.urdf > nul 2> nul")
-            os.system("del fitness*.txt > nul 2> nul")
-            os.system("del tmp*.txt > nul 2> nul")
-        else:
-            os.system("rm brain*.nndf > /dev/null 2> /dev/null")
-            os.system("rm body*.urdf > /dev/null 2> /dev/null")
-            os.system("rm fitness*.txt > /dev/null 2> /dev/null")
-            os.system("rm tmp*.txt > /dev/null 2> /dev/null")
-            
-        self.genome_type = CPPN
+        self.genome_type = genome_type
     
     
     def get_mutation_rates(self):
-        run_progress = self.gen / self.config.num_gens
+        """Get the mutate rates for the current generation 
+        if using a mutation rate schedule, else use config values
+
+        Returns:
+            float: prob_mutate_activation,
+            float: prob_mutate_weight,
+            float: prob_add_connection,
+            float: prob_add_node,
+            float: prob_remove_node,
+            float: prob_disable_connection,
+            float: weight_mutation_max, 
+            float: prob_reenable_connection
+        """
         if(self.config.use_dynamic_mutation_rates):
+            run_progress = self.gen / self.config.num_generations
             end_mod = self.config.dynamic_mutation_rate_end_modifier
             prob_mutate_activation   = self.config.prob_mutate_activation   - (self.config.prob_mutate_activation    - end_mod * self.config.prob_mutate_activation)   * run_progress
             prob_mutate_weight       = self.config.prob_mutate_weight       - (self.config.prob_mutate_weight        - end_mod * self.config.prob_mutate_weight)       * run_progress
@@ -120,7 +121,7 @@ class NEAT():
             sp.population_count = count_members_of_species(self.population, sp.id) 
             if(sp.population_count<=0): sp.allowed_offspring = 0; continue
             members = get_members_of_species(self.population, sp.id)
-            sp.update(global_average_fitness, members, self.gen, self.config.species_stagnation_threshold, self.config.pop_size)
+            sp.update(global_average_fitness, members, self.gen, self.config.species_stagnation_threshold, self.config.population_size)
 
     def show_fitness_curve(self):
         # plt.close()
@@ -153,9 +154,9 @@ class NEAT():
         
         print(" |-Species:")
         thresh_symbol = '='
-        if self.config.num_gens>1 and self.species_threshold_over_time[self.gen-2]<self.species_threshold and self.species_threshold_over_time[self.gen-2]!=0:
+        if self.config.num_generations>1 and self.species_threshold_over_time[self.gen-2]<self.species_threshold and self.species_threshold_over_time[self.gen-2]!=0:
             thresh_symbol = '▲' 
-        if self.config.num_gens>1 and self.species_threshold_over_time[self.gen-2]>self.species_threshold:
+        if self.config.num_generations>1 and self.species_threshold_over_time[self.gen-2]>self.species_threshold:
             thresh_symbol = '▼'
         print(f" |  Count: {num_species} / {self.config.species_target} | threshold: {self.species_threshold:.2f} {thresh_symbol}") 
         print(f" |  Best species (avg. fitness): {sorted(self.all_species, key=lambda x: x.avg_fitness if x.population_count > 0 else -1000000000, reverse=True)[0].id}")
@@ -175,7 +176,7 @@ class NEAT():
             sp.population_count = count_members_of_species(self.population, sp.id) 
             if(sp.population_count<=0): sp.allowed_offspring = 0; continue
             members = get_members_of_species(self.population, sp.id)
-            sp.update(global_average_fitness, members, self.gen, self.config.species_stagnation_threshold, self.config.pop_size)
+            sp.update(global_average_fitness, members, self.gen, self.config.species_stagnation_threshold, self.config.population_size)
 
         normalize_species_offspring(self.all_species, self.config)
         for sp in self.all_species:
@@ -232,14 +233,14 @@ class NEAT():
     def evolve(self, run_number = 1, show_output=True):
         self.run_number = run_number
         self.show_output = show_output or self.debug_output
-        for i in range(self.config.pop_size): # only create parents for initialization (the mu in mu+lambda)
+        for i in range(self.config.population_size): # only create parents for initialization (the mu in mu+lambda)
             self.population.append(self.genome_type()) # generate new random individuals as parents
             
         if self.config.use_speciation:
             assign_species(self.all_species, self.population, self.species_threshold, Species)
 
         # Run NEAT
-        pbar = trange(self.config.num_gens, desc="Generations")
+        pbar = trange(self.config.num_generations, desc="Generations")
         for self.gen in pbar:
             self.run_one_generation()
             pbar.set_postfix_str(f"f: {self.get_best().fitness:.4f}")
@@ -308,7 +309,7 @@ class NEAT():
             # sp.population_count = count_members_of_species(self.population, sp.id) 
             # if(sp.population_count<=0): sp.allowed_offspring = 0; continue
             # members = get_members_of_species(self.population, sp.id)
-            # sp.update(global_average_fitness, members, self.gen, self.config.species_stagnation_threshold, self.config.pop_size)
+            # sp.update(global_average_fitness, members, self.gen, self.config.species_stagnation_threshold, self.config.population_size)
 
         if(not self.config.use_speciation):
             self.population = tournament_selection(self.population, self.config, False) # tournament selection (novelty and fitness)
@@ -351,26 +352,9 @@ class NEAT():
     
     
     def mutate(self, child, rates):
-        prob_mutate_activation, prob_mutate_weight, prob_add_connection, prob_add_node, prob_remove_node, prob_disable_connection, weight_mutation_max, prob_reenable_connection = rates
-        
         child.fitness, child.adjusted_fitness = -math.inf, -math.inf # new fitnesses after mutation
+        child.mutate(rates)
 
-        if(np.random.uniform(0,1) < self.config.prob_random_restart):
-            child = self.genome_type()
-        if(np.random.uniform(0,1) < prob_add_node):
-            child.add_node()
-        if(np.random.uniform(0,1) < prob_remove_node):
-            child.remove_node()
-        if(np.random.uniform(0,1) < prob_add_connection):
-            child.add_connection()
-        if(np.random.uniform(0,1) < prob_disable_connection):
-            child.disable_connection()
-        # if(np.random.uniform(0,1)< prob_mutate_activation):
-        
-        child.mutate_activations(prob_mutate_activation)
-        child.mutate_weights(prob_mutate_weight)
-
-        
     def crossover(self, parent1, parent2):
         [fit_parent, less_fit_parent] = sorted(
             [parent1, parent2], key=lambda x: x.fitness, reverse=True)
@@ -448,7 +432,7 @@ class NEAT():
 
 def classic_selection_and_reproduction(c, population, all_species, generation_num, mutation_rates):
     new_children = []
-    while len(new_children) < c.pop_size:
+    while len(new_children) < c.population_size:
         # inheritance
         parent1 = np.random.choice(population, size=1)[0] # pick 1 random parent
 

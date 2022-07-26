@@ -17,6 +17,7 @@ class   Config:
         # These are only used if the frontend client doesn't override them
         self.population_size = 10
         self.num_generations = 1000
+        self.species_target = 3
         self.res_w = 28
         self.res_h = 28
         self.save_w = 512

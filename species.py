@@ -101,13 +101,13 @@ def assign_species(all_species, population, threshold, SpeciesClass):
             g.species_id = new_id
 
 def normalize_species_offspring(all_species, c):
-    # Normalize the number of allowed offspring per species so that the total is close to pop_size
+    # Normalize the number of allowed offspring per species so that the total is close to population_size
     total_offspring = np.sum([s.allowed_offspring for s in all_species])
-    target_children = c.pop_size
+    target_children = c.population_size
     target_children -= c.population_elitism # first children will be most fit from last gen 
     if(total_offspring == 0): total_offspring = 1 # TODO FIXME (total extinction)
 
-    norm = c.pop_size / total_offspring
+    norm = c.population_size / total_offspring
     
     for sp in all_species:
         try:
@@ -118,17 +118,17 @@ def normalize_species_offspring(all_species, c):
 
     return norm
 
-def normalize_species_offspring_exact(all_species, pop_size):
-    # Jackson's method (always exact pop_size)
+def normalize_species_offspring_exact(all_species, population_size):
+    # Jackson's method (always exact population_size)
     # if there are not enough offspring, assigns extras to top (multiple) species,
     # if there are too many, takes away from worst (multiple) species
     total_offspring = np.sum([s.allowed_offspring for s in all_species])
-    adj = 1 if total_offspring<pop_size else -1
-    sorted_species = sorted(all_species, key=lambda x: x.avg_adjusted_fitness, reverse=(total_offspring<pop_size))
-    while(total_offspring!=pop_size):
+    adj = 1 if total_offspring<population_size else -1
+    sorted_species = sorted(all_species, key=lambda x: x.avg_adjusted_fitness, reverse=(total_offspring<population_size))
+    while(total_offspring!=population_size):
         for s in sorted_species:
             if(s.population_count == 0 or s.allowed_offspring == 0): continue
             s.allowed_offspring+=adj
             total_offspring+=adj
             print("adj=", adj)
-            if(total_offspring==pop_size): break
+            if(total_offspring==population_size): break
