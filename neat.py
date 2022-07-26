@@ -4,16 +4,14 @@ import time
 from matplotlib import pyplot as plt
 import numpy as np
 from tqdm import trange
-from cppn import Connection, CPPN, Node, find_node_with_id, get_matching_connections
-from util import get_avg_number_of_connections, get_avg_number_of_hidden_nodes, get_max_number_of_connections, get_max_number_of_hidden_nodes, visualize_network
-from species import *
+from cppn_neat.cppn import *
+from cppn_neat.util import *
+from cppn_neat.species import *
 import copy 
 
 import random
 import copy
 import os
-import platform
-# import constants as c
 
 class NEAT():
     def __init__(self, config, debug_output=False, genome_type=CPPN) -> None:
@@ -22,7 +20,7 @@ class NEAT():
         self.debug_output = debug_output
         self.all_species = []
         self.config = config
-        Node.current_id =  self.config.num_sensor_neurons + self.config.num_motor_neurons # reset node id counter
+        Node.current_id =  self.config.num_inputs + self.config.num_outputs # reset node id counter
         self.show_output = True
         
         self.diversity_over_time = np.zeros(self.config.num_generations,dtype=float)
@@ -82,7 +80,7 @@ class NEAT():
         for i in pbar:
             if self.show_output:
                 pbar.set_description_str("Creating simulations for gen " + str(self.gen) + ": ")
-            self.population[i].start_simulation(True, self.debug_output)
+            self.population[i].start_simulation(True, self.debug_output) # TODO
             
         if self.show_output:
             pbar = trange(len(self.population))
@@ -234,7 +232,7 @@ class NEAT():
         self.run_number = run_number
         self.show_output = show_output or self.debug_output
         for i in range(self.config.population_size): # only create parents for initialization (the mu in mu+lambda)
-            self.population.append(self.genome_type()) # generate new random individuals as parents
+            self.population.append(self.genome_type(self.config)) # generate new random individuals as parents
             
         if self.config.use_speciation:
             assign_species(self.all_species, self.population, self.species_threshold, Species)

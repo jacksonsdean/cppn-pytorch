@@ -36,6 +36,9 @@ class   Config:
         self.seed = random.randint(0, 100000)
         self.prob_crossover = .25
         
+        # NEAT specific parameters
+        self.use_speciation = True
+        self.init_species_threshold = .75
 
         """DGNA: the probability of adding a node is 0.5 and the
         probability of adding a connection is 0.4.
@@ -62,6 +65,22 @@ class   Config:
         self.use_input_bias = True # SNGA,
         self.use_radial_distance = True # bias towards radial symmetry
         
+        self.num_inputs = 2
+        self.num_outputs = len(self.color_mode)
+        if self.use_input_bias:
+            self.num_inputs += 1
+        if self.use_radial_distance:
+            self.num_inputs += 1
+            
+        
+    def apply_condition(self, key, value):
+        """Applies a condition to the configuration."""
+        setattr(self, key, value)
+        
+    #################    
+    # Serialization #
+    #################
+    
     def serialize(self):
         self.fns_to_strings()
         

@@ -9,12 +9,12 @@ import torch
 try:
     from activation_functions import identity
     from graph_util import name_to_fn, choose_random_function, is_valid_connection
-    from graph_util import get_matching_connections, find_node_with_id
+    from graph_util import *
     from graph_util import get_incoming_connections, feed_forward_layers
     from graph_util import hsv2rgb
 except ModuleNotFoundError:
     from cppn_neat.activation_functions import identity
-    from cppn_neat.graph_util import get_matching_connections, find_node_with_id
+    from cppn_neat.graph_util import *
     from cppn_neat.graph_util import name_to_fn, choose_random_function, is_valid_connection
     from cppn_neat.graph_util import get_incoming_connections, feed_forward_layers
     from cppn_neat.graph_util import hsv2rgb
@@ -212,6 +212,7 @@ class CPPN():
         self.node_genome = []  # inputs first, then outputs, then hidden
         self.connection_genome = []
         self.selected = False
+        self.species_id = 0
         
         torch.manual_seed(config.seed)
 
@@ -731,6 +732,60 @@ class CPPN():
         if image_range != 0: # prevent divide by 0
             self.image /= image_range
         self.image = self.image.to(dtype=torch.uint8)
+
+    def genetic_difference(self, other) -> float:
+        # only enabled connections, sorted by innovation id
+        this_cxs = sorted(self.enabled_connections(),
+                          key=lambda c: c.innovation)
+        other_cxs = sorted(other.enabled_connections(),
+                           key=lambda c: c.innovation)
+
+        N = max(len(this_cxs), len(other_cxs))
+        other_innovation = [c.innovation for c in other_cxs]
+
+        # number of excess connections
+        n_excess = len(get_excess_connections(this_cxs, other_innovation))
+        # number of disjoint connections
+        n_disjoint = len(get_disjoint_connections(this_cxs, other_innovation))
+
+        # matching connections
+        this_matching, other_matching = get_matching_connections(
+            this_cxs, other_cxs)
+        difference_of_matching_weights = [
+            torch.abs(o_cx.weight-t_cx.weight) for o_cx, t_cx in zip(other_matching, this_matching)]
+        difference_of_matching_weights = torch.stack(difference_of_matching_weights)
+        
+        if(len(difference_of_matching_weights) == 0):
+            difference_of_matching_weights = 0
+        difference_of_matching_weights = torch.mean(
+            difference_of_matching_weights)
+
+        # Furthermore, the compatibility distance function
+        # includes an additional argument that counts how many
+        # activation functions differ between the two individuals
+        n_different_fns = 0
+        for t_node, o_node in zip(self.node_genome, other.node_genome):
+            if(t_node.activation.__name__ != o_node.activation.__name__):
+                n_different_fns += 1
+
+        # can normalize by size of network (from Ken's paper)
+        if(N > 0):
+            n_excess /= N
+            n_disjoint /= N
+
+        # weight (values from Ken)
+        n_excess *= 1
+        n_disjoint *= 1
+        difference_of_matching_weights *= .4
+        n_different_fns *= 1
+        difference = n_excess + n_disjoint + \
+            difference_of_matching_weights + n_different_fns
+
+        return difference
+
+    def species_comparision(self, other, threshold) -> bool:
+        # returns whether other is the same species as self
+        return self.genetic_difference(other) <= threshold  # TODO equal to?
 
     def crossover(self, other_parent):
         """Crossover with another CPPN using the method in Stanley and Miikkulainen (2007)."""

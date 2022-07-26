@@ -26,7 +26,7 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
     c = individual.config
     if(sample):
         if sample_point is None:
-            sample_point = [.25]*c.num_sensor_neurons
+            sample_point = [.25]*c.num_inputs
         individual.eval(sample_point)
             
         
