@@ -1,6 +1,7 @@
 import math
 import random
 import numpy as np
+import torch
 
 class Species:
     def __init__(self, _id) -> None:
@@ -14,8 +15,8 @@ class Species:
         self.current_champ = None
     
     def update(self, global_adjusted_fitness, members, gen, stagnation_threshold, total_pop):
-        self.avg_adjusted_fitness = np.mean([i.adjusted_fitness for i in members])
-        self.avg_fitness =  np.mean([i.fitness for i in members])
+        self.avg_adjusted_fitness = torch.mean(torch.stack([i.adjusted_fitness for i in members]))
+        self.avg_fitness =  torch.mean(torch.stack([i.fitness for i in members]))
         if(self.avg_fitness > self.last_fitness):
             self.last_improvement = gen
         self.last_fitness = self.avg_fitness
@@ -30,7 +31,7 @@ class Species:
         else:
             try:
                 # nk = (Fk/Ftot)*P 
-                self.allowed_offspring = int(round(self.population_count * (self.avg_adjusted_fitness / global_adjusted_fitness)))
+                self.allowed_offspring = int(torch.round(self.population_count * (self.avg_adjusted_fitness / global_adjusted_fitness)))
                 if self.allowed_offspring < 0: self.allowed_offspring = 0
             except ArithmeticError:
                 print(f"error while calc allowed_offspring: pop:{self.population_count} fit:{self.avg_adjusted_fitness} glob: {global_adjusted_fitness}")
@@ -40,9 +41,9 @@ class Species:
 
 
 def get_adjusted_fitness_of_species(population, species):
-    return np.mean([i.adjusted_fitness for i in population if i.species_id == species])
+    return torch.mean(torch.stack([i.adjusted_fitness for i in population if i.species_id == species]))
 def get_fitness_of_species(population, species):
-    return np.mean([i.fitness for i in population if i.species_id == species])
+    return torch.mean(torch.stack([i.fitness for i in population if i.species_id == species]))
 def count_members_of_species(population, species):
     return len(get_members_of_species(population, species))
 def get_members_of_species(population, species):
@@ -105,13 +106,14 @@ def normalize_species_offspring(all_species, c):
     total_offspring = np.sum([s.allowed_offspring for s in all_species])
     target_children = c.population_size
     target_children -= c.population_elitism # first children will be most fit from last gen 
-    if(total_offspring == 0): total_offspring = 1 # TODO FIXME (total extinction)
 
+    if(total_offspring == 0): total_offspring = 1 # TODO FIXME (total extinction)
+    
     norm = c.population_size / total_offspring
     
     for sp in all_species:
         try:
-            sp.allowed_offspring = int(round(sp.allowed_offspring * norm))
+            sp.allowed_offspring = int(np.round(sp.allowed_offspring * norm))
         except ValueError as e:
             print(f"unexpected value during species offspring normalization, ignoring: {e} offspring: {sp.allowed_offspring} norm:{norm}")
             continue
@@ -122,7 +124,7 @@ def normalize_species_offspring_exact(all_species, population_size):
     # Jackson's method (always exact population_size)
     # if there are not enough offspring, assigns extras to top (multiple) species,
     # if there are too many, takes away from worst (multiple) species
-    total_offspring = np.sum([s.allowed_offspring for s in all_species])
+    total_offspring = torch.sum(torch.stack([s.allowed_offspring for s in all_species]))
     adj = 1 if total_offspring<population_size else -1
     sorted_species = sorted(all_species, key=lambda x: x.avg_adjusted_fitness, reverse=(total_offspring<population_size))
     while(total_offspring!=population_size):

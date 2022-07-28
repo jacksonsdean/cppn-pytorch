@@ -14,7 +14,7 @@ import copy
 import os
 
 class NEAT():
-    def __init__(self, config, debug_output=False, genome_type=CPPN) -> None:
+    def __init__(self, target, config, debug_output=False, genome_type=CPPN) -> None:
         self.gen = 0
         self.next_available_id = 0
         self.debug_output = debug_output
@@ -37,10 +37,19 @@ class NEAT():
         self.population = []
         self.solution = None
         
-        self.solution_fitness = 0
-        self.best_brain = None
+        self.solution_fitness = -math.inf
+        self.best_genome = None
 
         self.genome_type = genome_type
+        
+        self.fitness_function = config.fitness_function
+        
+        if not isinstance(config.fitness_function, Callable):
+              self.fitness_function = name_to_fn(config.fitness_function)
+         # normalize fitness function
+        self.fitness_function_normed = lambda x,y: (self.config.fitness_function(x,y) - self.config.min_fitness) / (self.config.max_fitness - self.config.min_fitness)
+              
+        self.target = target
     
     
     def get_mutation_rates(self):
@@ -79,17 +88,21 @@ class NEAT():
             pbar = range(len(self.population))
         for i in pbar:
             if self.show_output:
-                pbar.set_description_str("Creating simulations for gen " + str(self.gen) + ": ")
-            self.population[i].start_simulation(True, self.debug_output) # TODO
+                pbar.set_description_str("Evaluating gen " + str(self.gen) + ": ")
+                
+            # self.population[i].start_simulation(True, self.debug_output) # TODO
+            
+            # self.population[i].fitness = self.fitness_function(self.population[i].get_image(), self.target)
+            self.population[i].fitness = self.fitness_function_normed(self.population[i].get_image(), self.target)
             
         if self.show_output:
             pbar = trange(len(self.population))
         else:
             pbar = range(len(self.population))
-        for i in pbar:
-            if self.show_output:
-                pbar.set_description_str("Simulating gen " + str(self.gen) + ": ")
-            self.population[i].wait_for_simulation()
+        # for i in pbar:
+        #     if self.show_output:
+        #         pbar.set_description_str("Simulating gen " + str(self.gen) + ": ")
+        #     self.population[i].wait_for_simulation()
             
         for i, g in enumerate(self.population):
             self.population[i].update_with_fitness(g.fitness, count_members_of_species(self.population, self.population[i].species_id))
@@ -112,9 +125,9 @@ class NEAT():
         
         
         for sp in self.all_species:
-            sp.avg_fitness = np.mean([i.fitness for i in get_members_of_species(self.population, sp.id)] if count_members_of_species(self.population, sp.id)>0 else [-1000000])
-            sp.avg_adj_fitness = np.mean([i.adjusted_fitness for i in get_members_of_species(self.population, sp.id)] if count_members_of_species(self.population, sp.id)>0 else [-1000000])
-        global_average_fitness = np.mean([i.adjusted_fitness for i in self.population])
+            sp.avg_fitness = torch.mean(torch.stack([i.fitness for i in get_members_of_species(self.population, sp.id)])) if count_members_of_species(self.population, sp.id)>0 else -1000000
+            sp.avg_adj_fitness = torch.mean(torch.stack([i.adjusted_fitness for i in get_members_of_species(self.population, sp.id)])) if count_members_of_species(self.population, sp.id)>0 else -1000000
+        global_average_fitness = torch.mean(torch.stack([i.adjusted_fitness for i in self.population]))
         for sp in self.all_species:
             sp.population_count = count_members_of_species(self.population, sp.id) 
             if(sp.population_count<=0): sp.allowed_offspring = 0; continue
@@ -144,11 +157,11 @@ class NEAT():
         num_species = count_number_of_species(self.population)
         print("Generation", self.gen, "="*100)
         print(f" |-Best: {self.get_best().id} ({self.get_best().fitness:.4f})")
-        print(f" |  Average fitness: {np.mean([i.fitness for i in self.population]):.7f} | adjusted: {np.mean([i.adjusted_fitness for i in self.population]):.7f}")
+        print(f" |  Average fitness: {torch.mean(torch.stack([i.fitness for i in self.population])):.7f} | adjusted: {torch.mean(torch.stack([i.adjusted_fitness for i in self.population])):.7f}")
         print(f" |  Diversity: std: {div[0]:.3f} | avg: {div[1]:.3f} | max: {div[2]:.3f}")
         print(f" |  Connections: avg. {get_avg_number_of_connections(self.population):.2f} max. {get_max_number_of_connections(self.population)}  | H. Nodes: avg. {get_avg_number_of_hidden_nodes(self.population):.2f} max: {get_max_number_of_hidden_nodes(self.population)}")
         for individual in self.population:
-            print(f" |     Individual {individual.id} ({len(individual.hidden_nodes())}, {len(list(individual.enabled_connections())), np.count_nonzero([cx.is_recurrent for cx in individual.enabled_connections()] )}) s: {individual.species_id} fit: {individual.fitness:.4f}")
+            print(f" |     Individual {individual.id} ({len(individual.hidden_nodes())}, {len(list(individual.enabled_connections()))}, s: {individual.species_id} fit: {individual.fitness:.4f}")
         
         print(" |-Species:")
         thresh_symbol = '='
@@ -169,7 +182,8 @@ class NEAT():
         new_children = []
         # for i in self.population:
             # print("Individual:", i.id, "adjusted fitness:", i.adjusted_fitness)
-        global_average_fitness = np.mean([i.adjusted_fitness for i in self.population])
+        
+        global_average_fitness = torch.mean(torch.stack([i.adjusted_fitness for i in self.population]))
         for sp in self.all_species:
             sp.population_count = count_members_of_species(self.population, sp.id) 
             if(sp.population_count<=0): sp.allowed_offspring = 0; continue
@@ -208,7 +222,7 @@ class NEAT():
                 parent1 = np.random.choice(members, size=max(len(members), 1))[0] # pick 1 random parent
                 #crossover
                 if(self.config.do_crossover and parent1):
-                    if(np.random.rand()<.001): # cross-species crossover (.001 in s/m07)
+                    if(np.random.rand()<self.config.crossover_between_species_probability): # cross-species crossover (.001 in s/m07)
                         other_id = -1
                         for sp2 in self.all_species:
                             if count_members_of_species(self.population, sp2.id) > 0 and sp2.id!=sp.id:
@@ -216,7 +230,9 @@ class NEAT():
                         if(other_id>-1): members = get_members_of_species(self.population, other_id)
                     parent2 = np.random.choice(members, size=max(len(members), 1))[0] # allow parents to crossover with themselves
                     if parent2:
-                        child = self.crossover(parent1, parent2)
+                        # child = self.crossover(parent1, parent2)
+                        sorted_parents = sorted([parent1, parent2], key=lambda x: x.fitness, reverse=True)
+                        child = sorted_parents[0].crossover(sorted_parents[1])
                 else:
                     if parent1:
                         child = copy.deepcopy(parent1)    
@@ -229,20 +245,22 @@ class NEAT():
         return new_children
 
     def evolve(self, run_number = 1, show_output=True):
-        self.run_number = run_number
-        self.show_output = show_output or self.debug_output
-        for i in range(self.config.population_size): # only create parents for initialization (the mu in mu+lambda)
-            self.population.append(self.genome_type(self.config)) # generate new random individuals as parents
-            
-        if self.config.use_speciation:
-            assign_species(self.all_species, self.population, self.species_threshold, Species)
+        try:
+            self.run_number = run_number
+            self.show_output = show_output or self.debug_output
+            for i in range(self.config.population_size): # only create parents for initialization (the mu in mu+lambda)
+                self.population.append(self.genome_type(self.config)) # generate new random individuals as parents
+                
+            if self.config.use_speciation:
+                assign_species(self.all_species, self.population, self.species_threshold, Species)
 
-        # Run NEAT
-        pbar = trange(self.config.num_generations, desc="Generations")
-        for self.gen in pbar:
-            self.run_one_generation()
-            pbar.set_postfix_str(f"f: {self.get_best().fitness:.4f}")
-            
+            # Run NEAT
+            pbar = trange(self.config.num_generations, desc="Generations")
+            for self.gen in pbar:
+                self.run_one_generation()
+                pbar.set_postfix_str(f"f: {self.get_best().fitness:.4f} d:{self.diversity_over_time[self.gen-1]:.4f}")
+        except KeyboardInterrupt:
+            raise KeyboardInterrupt()            
 
     def run_one_generation(self):
        
@@ -301,7 +319,7 @@ class NEAT():
          # TODO NOT SURE:
         assign_species(self.all_species, self.population, self.species_threshold, Species) # assign new species ids
         
-        # global_average_fitness = np.mean([i.adjusted_fitness for i in self.population])
+        # global_average_fitness = np.mean(torch.stack([i.adjusted_fitness for i in self.population]))
         # for sp in self.all_species:
             # sp.avg_fitness = np.mean([i.fitness for i in get_members_of_species(self.population, sp.id)] if count_members_of_species(self.population, sp.id)>0 else [-1000000])
             # sp.population_count = count_members_of_species(self.population, sp.id) 
@@ -330,6 +348,7 @@ class NEAT():
             self.solution = self.population[0]                 # update best solution records
             self.solution_fitness = self.population[0].fitness
             self.solution_generation = self.gen
+            self.best_genome = self.solution
             # save best TODO
                 
         self.fitness_over_time[self.gen:] = self.solution_fitness # record the fitness of the current best over evolutionary time
@@ -357,7 +376,7 @@ class NEAT():
         [fit_parent, less_fit_parent] = sorted(
             [parent1, parent2], key=lambda x: x.fitness, reverse=True)
         # child = copy.deepcopy(fit_parent)
-        child = self.genome_type()
+        child = self.genome_type(self.config)
         child.species_id = fit_parent.species_id
         # disjoint/excess genes are inherited from more fit parent
         child.node_genome = copy.deepcopy(fit_parent.node_genome)
@@ -409,9 +428,10 @@ class NEAT():
         # child.disable_invalid_connections()
         
         return child
+    
     def get_best(self):
-        lowest = max(self.population, key=(lambda k: k.fitness))
-        return lowest
+        max_fitness_individual = max(self.population, key=lambda x: x.fitness)
+        return max_fitness_individual
     
     def print_best(self):
         best = self.get_best()
@@ -420,12 +440,19 @@ class NEAT():
     def show_best(self):
         print()
         self.print_best()
-        self.get_best().start_simulation(False, self.debug_output, True)
         self.save_best_network_image()
+        img = self.get_best().get_image().cpu().to(np.uint8).numpy()
+        plt.imshow(img)
+        plt.show()
+        
+    def save_best_img(self,fname):
+        img = self.get_best().get_image().cpu().numpy()
+        plt.imsave(fname, img)
 
     def save_best_network_image(self):
         best = self.get_best()
-        visualize_network(self.get_best(), sample=False, save_name=f"best/{time.time()}_e{self.run_number}_{self.gen}_{best.id}.png", extra_text=f"Run {self.run_number} Generation: " + str(self.gen) + " fit: " + str(best.fitness) + " species: " + str(best.species_id))
+        path = f"{self.config.output_dir}/genomes/best_{self.gen}.png"
+        visualize_network(self.get_best(), sample=False, save_name=path, extra_text=f"Run {self.run_number} Generation: " + str(self.gen) + " fit: " + str(best.fitness) + " species: " + str(best.species_id))
 
 
 def classic_selection_and_reproduction(c, population, all_species, generation_num, mutation_rates):
@@ -437,7 +464,6 @@ def classic_selection_and_reproduction(c, population, all_species, generation_nu
         #crossover
         if(c.do_crossover):
             parent2 = np.random.choice(get_members_of_species(population, parent1.species_id), size=1)[0] # note, we are allowing parents to crossover with themselves
-            # child = crossover(parent1, parent2)
             child = parent1.crossover(parent2)
         else:
             child = copy.deepcopy(parent1)

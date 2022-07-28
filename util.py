@@ -39,7 +39,7 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
     function_colors = {}
     # colors = ['r', 'g', 'b', 'c', 'm', 'y', 'orange', 'darkviolet',
     #         'hotpink', 'chocolate', 'lawngreen', 'lightsteelblue']
-    colors = ['lightsteelblue'] * len([node.fn for node in individual.node_genome])
+    colors = ['lightsteelblue'] * len([node.activation for node in individual.node_genome])
     node_labels = {}
 
     node_size = 2000
@@ -47,7 +47,7 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
     # plt.figure(figsize=(7, 6), frameon=False)
     plt.subplots_adjust(left=0, bottom=0, right=1.25, top=1.25, wspace=0, hspace=0)
 
-    for i, fn in enumerate([node.fn for node in individual.node_genome]):
+    for i, fn in enumerate([node.activation for node in individual.node_genome]):
         function_colors[fn.__name__] = colors[i]
     function_colors["identity"] = colors[0]
 
@@ -55,22 +55,23 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
     inputs = individual.input_nodes()
     
     for i, node in enumerate(inputs):
-        G.add_node(node, color=function_colors[node.fn.__name__], shape='d', layer=(node.layer))
+        G.add_node(node, color=function_colors[node.activation.__name__], shape='d', layer=(node.layer))
         if node.type == 0:
-            node_labels[node] = f"S{i}:\n{node.fn.__name__}\n"+(f"{node.output:.3f}" if node.output!=None else "")
-        else:
-            node_labels[node] = f"CPG"
+            # node_labels[node] = f"S{i}:\n{node.activation.__name__}\n"+(f"{node.outputs[0]:.3f}" if node.outputs[0]!=None else "")
+            node_labels[node] = f"input{i}"
             
         fixed_positions[node] = (-4,((i+1)*2.)/len(inputs))
 
     for node in individual.hidden_nodes():
-        G.add_node(node, color=function_colors[node.fn.__name__], shape='o', layer=(node.layer))
-        node_labels[node] = f"{node.id}\n{node.fn.__name__}\n"+(f"{node.output:.3f}" if node.output!=None else "" )
+        G.add_node(node, color=function_colors[node.activation.__name__], shape='o', layer=(node.layer))
+        # node_labels[node] = f"{node.id}\n{node.activation.__name__}\n"+(f"{node.outputs:.3f}" if node.outputs!=None else "" )
+        node_labels[node] = f"{node.id}\n{node.activation.__name__}"
 
     for i, node in enumerate(individual.output_nodes()):
         title = i
-        G.add_node(node, color=function_colors[node.fn.__name__], shape='s', layer=(node.layer))
-        node_labels[node] = f"M{title}:\n{node.fn.__name__}\n"+(f"{node.output:.3f}")
+        G.add_node(node, color=function_colors[node.activation.__name__], shape='s', layer=(node.layer))
+        # node_labels[node] = f"M{title}:\n{node.activation.__name__}\n"+(f"{node.outputs:.3f}")
+        node_labels[node] = f"output{title}:\n{node.activation.__name__}"
         fixed_positions[node] = (4, ((i+1)*2)/len(individual.output_nodes()))
     pos = {}
     # shells = [[node for node in individual.input_nodes()], [node for node in individual.hidden_nodes()], [node for node in individual.output_nodes()]]
@@ -157,7 +158,7 @@ def visualize_hn_phenotype_network(individual, visualize_disabled=False, layout=
     function_colors = {}
     # colors = ['r', 'g', 'b', 'c', 'm', 'y', 'orange', 'darkviolet',
     #         'hotpink', 'chocolate', 'lawngreen', 'lightsteelblue']
-    colors = ['lightsteelblue'] * len([node.fn for node in node_genome])
+    colors = ['lightsteelblue'] * len([node.activation for node in node_genome])
     node_labels = {}
 
     node_size = 2000
@@ -165,7 +166,7 @@ def visualize_hn_phenotype_network(individual, visualize_disabled=False, layout=
     # plt.figure(figsize=(7, 6), frameon=False)
     plt.subplots_adjust(left=0, bottom=0, right=1.25, top=1.25, wspace=0, hspace=0)
 
-    for i, fn in enumerate([node.fn for node in node_genome]):
+    for i, fn in enumerate([node.activation for node in node_genome]):
         function_colors[fn.__name__] = colors[i]
     function_colors["identity"] = colors[0]
 
@@ -173,22 +174,22 @@ def visualize_hn_phenotype_network(individual, visualize_disabled=False, layout=
     inputs = input_nodes
     
     for i, node in enumerate(inputs):
-        G.add_node(node, color=function_colors[node.fn.__name__], shape='d', layer=(node.layer))
+        G.add_node(node, color=function_colors[node.activation.__name__], shape='d', layer=(node.layer))
         if node.type == 0:
-            node_labels[node] = f"S{i}:\n{node.fn.__name__}\n"+(f"{node.output:.3f}" if node.output!=None else "")
+            node_labels[node] = f"S{i}:\n{node.activation.__name__}\n"+(f"{node.outputs:.3f}" if node.outputs!=None else "")
         else:
             node_labels[node] = f"CPG"
             
         fixed_positions[node] = (-4,((i+1)*2.)/len(inputs))
 
     for node in hidden_nodes:
-        G.add_node(node, color=function_colors[node.fn.__name__], shape='o', layer=(node.layer))
-        node_labels[node] = f"{node.id}\n{node.fn.__name__}\n"+(f"{node.output:.3f}" if node.output!=None else "" )
+        G.add_node(node, color=function_colors[node.activation.__name__], shape='o', layer=(node.layer))
+        node_labels[node] = f"{node.id}\n{node.activation.__name__}\n"+(f"{node.outputs:.3f}" if node.outputs!=None else "" )
 
     for i, node in enumerate(output_nodes):
         title = i
-        G.add_node(node, color=function_colors[node.fn.__name__], shape='s', layer=(node.layer))
-        node_labels[node] = f"M{title}:\n{node.fn.__name__}\n"+(f"{node.output:.3f}")
+        G.add_node(node, color=function_colors[node.activation.__name__], shape='s', layer=(node.layer))
+        node_labels[node] = f"M{title}:\n{node.activation.__name__}\n"+(f"{node.outputs:.3f}")
         fixed_positions[node] = (4, ((i+1)*2)/len(output_nodes))
     pos = {}
     # shells = [[node for node in individual.input_nodes()], [node for node in individual.hidden_nodes()], [node for node in individual.output_nodes()]]
@@ -262,50 +263,6 @@ def visualize_hn_phenotype_network(individual, visualize_disabled=False, layout=
         # plt.close()
     ""
     # labels = nx.get_edge_attributes(G,'weight')
-
-
-
-def plot_mean_and_bootstrapped_ci_over_time(input_data = None, dataset=None, name = "change me", x_label = "change me", y_label="change me", y_limit = None, plot_bootstrap = True, show=False, title=None):
-    """
-    
-    parameters: 
-    input_data: (numpy array of shape (max_k, num_repitions)) solution metric to plot
-    name: (string) name for legend
-    x_label: (string) x axis label
-    y_label: (string) y axis label
-    
-    returns:
-    None
-    """
-    fig, ax = plt.subplots() # generate figure and axes
-    input_data = [np.array(x) for x in input_data if isinstance(x, list)]
-    input_data = np.array(input_data)
-    if isinstance(name, str): name = [name]; input_data = [input_data]
-
-    # for this_input_data, this_name in zip(input_data, name):
-    for index, this_name in enumerate(name):
-        # print("plotting",this_name, "with shape", dataset[index].shape)
-        this_input_data = dataset[index]
-        total_generations = this_input_data.shape[1]
-        if(plot_bootstrap):
-            boostrap_ci_generation_found = np.zeros((2,total_generations))
-            for this_gen in range(total_generations):
-                boostrap_ci_generation_found[:,this_gen] = bootstrap.ci(this_input_data[:,this_gen], np.nanmean, alpha=0.05)
-
-
-        ax.plot(np.arange(total_generations), np.nanmean(this_input_data,axis=0), label = this_name) # plot the fitness over time
-        if plot_bootstrap:
-            ax.fill_between(np.arange(total_generations), boostrap_ci_generation_found[0,:], boostrap_ci_generation_found[1,:],alpha=0.3) # plot, and fill, the confidence interval for fitness over time
-        ax.set_xlabel(x_label) # add axes labels
-        ax.set_ylabel(y_label)
-        if y_limit: ax.set_ylim(y_limit[0],y_limit[1])
-        if title is not None:
-            plt.title(title)
-        else:
-            plt.title(y_label)
-        plt.legend(loc='best'); # add legend
-        if show:
-            plt.show() 
 
 def get_best_solution_from_all_runs(results):
     best_fit = -math.inf

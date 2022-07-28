@@ -180,6 +180,8 @@ class CPPN():
     """A CPPN Object with Nodes and Connections."""
 
     pixel_inputs = torch.zeros((0, 0, 0)) # (res_h, res_w, n_inputs)
+    current_id = 0
+    
     @staticmethod
     def initialize_inputs(res_h, res_w, use_radial_dist, use_bias, n_inputs,device ):
         """Initializes the pixel inputs."""
@@ -202,8 +204,8 @@ class CPPN():
                     this_pixel.append(1.0) # bias = 1.0
                 CPPN.pixel_inputs[y][x] = torch.tensor(this_pixel, device=device)
 
-    def __init__(self, config, nodes = None, connections = None, device=None) -> None:
-        self.device = device
+    def __init__(self, config, nodes = None, connections = None) -> None:
+        self.device = config.device
         if self.device is None:
             # no device specified, try to use GPU
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -213,6 +215,7 @@ class CPPN():
         self.connection_genome = []
         self.selected = False
         self.species_id = 0
+        self.id = 0
         
         torch.manual_seed(config.seed)
 
@@ -232,7 +235,15 @@ class CPPN():
             self.initialize_connection_genome()
         else:
             self.connection_genome = connections
-
+    
+    @staticmethod
+    def get_id():
+        CPPN.current_id += 1
+        return CPPN.current_id - 1
+    
+    def set_id(self, id):
+        self.id = id
+        
     def initialize_connection_genome(self):
         """Initializes the connection genome."""
         output_layer = self.node_genome[self.n_inputs].layer
@@ -615,10 +626,10 @@ class CPPN():
                 for cx in node_inputs:
                     node.sum_input += cx.from_node.outputs * cx.weight
 
-                node.output = node.activation(node.sum_input)  # apply activation
-                # node.output = np.clip(node.output, -1, 1) # clip output
+                node.outputs = node.activation(node.sum_input)  # apply activation
+                # node.outputs = np.clip(node.outputs, -1, 1) # clip output
 
-        return [node.output for node in self.output_nodes()]
+        return [node.outputs for node in self.output_nodes()]
 
     def get_image(self, force_recalculate=False, override_h=None, override_w=None):
         """Returns an image of the network."""
@@ -751,13 +762,14 @@ class CPPN():
         # matching connections
         this_matching, other_matching = get_matching_connections(
             this_cxs, other_cxs)
+        
         difference_of_matching_weights = [
-            torch.abs(o_cx.weight-t_cx.weight) for o_cx, t_cx in zip(other_matching, this_matching)]
-        difference_of_matching_weights = torch.stack(difference_of_matching_weights)
+            abs(o_cx.weight-t_cx.weight) for o_cx, t_cx in zip(other_matching, this_matching)]
+        # difference_of_matching_weights = torch.stack(difference_of_matching_weights)
         
         if(len(difference_of_matching_weights) == 0):
             difference_of_matching_weights = 0
-        difference_of_matching_weights = torch.mean(
+        difference_of_matching_weights = np.mean(
             difference_of_matching_weights)
 
         # Furthermore, the compatibility distance function
@@ -787,6 +799,18 @@ class CPPN():
         # returns whether other is the same species as self
         return self.genetic_difference(other) <= threshold  # TODO equal to?
 
+    def update_with_fitness(self, fit, num_in_species):
+        self.fitness = fit
+        if(num_in_species > 0):
+            self.adjusted_fitness = self.fitness / num_in_species  # local competition
+            try:
+                assert not torch.isnan(self.adjusted_fitness).any(), f"adjusted fitness was nan: fit: {self.fitness} n_in_species: {num_in_species}"
+            except AssertionError as e:
+                print(e)
+        else:
+            self.adjusted_fitness = self.fitness
+            print("ERROR: num_in_species was 0")
+
     def crossover(self, other_parent):
         """Crossover with another CPPN using the method in Stanley and Miikkulainen (2007)."""
         child = CPPN(self.config) # create child
@@ -796,7 +820,7 @@ class CPPN():
         child.connection_genome = copy.deepcopy(self.connection_genome)
 
         # line up by innovation number and find matches
-        # child.connection_genome.sort(key=lambda x: x.innovation)
+        child.connection_genome.sort(key=lambda x: x.innovation)
         matching1, matching2 = get_matching_connections(
             self.connection_genome, other_parent.connection_genome)
 
@@ -826,6 +850,7 @@ class CPPN():
             except ValueError:
                 # this node does not exist in the child genome, don't add connection
                 child.connection_genome.remove(child_cx)
+                raise ValueError(f"Could not find node with id {new_from.id}")
             try:
                 existing = find_node_with_id(child.node_genome, new_to.id)
                 index_existing = child.node_genome.index(existing)
@@ -833,11 +858,12 @@ class CPPN():
             except ValueError:
                 # this node does not exist in the child genome, don't add connection
                 child.connection_genome.remove(child_cx)
+                raise ValueError(f"Could not find node with id {new_to.id}")
 
             if(not match_1.enabled or not match_2.enabled):
                 if random_uniform() < 0.75:  # 0.75 from Stanley/Miikulainen 2007
                     child_cx.enabled = False
 
-        child.update_node_layers()
+        # child.update_node_layers()
 
         return child
