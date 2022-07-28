@@ -74,6 +74,7 @@ def get_excess_connections(this_cxs, other_innovation):
 def get_matching_connections(cxs_1, cxs_2):
     """returns connections in cxs_1 that share an innovation number with a connection in cxs_2
        and     connections in cxs_2 that share an innovation number with a connection in cxs_1"""
+       
     return sorted([c1 for c1 in cxs_1 if c1.innovation in [c2.innovation for c2 in cxs_2]],
                     key=lambda x: x.innovation),\
                     sorted([c2 for c2 in cxs_2 if c2.innovation in [c1.innovation for c1 in cxs_1]],
@@ -85,6 +86,13 @@ def find_node_with_id(nodes, node_id):
     for node in nodes:
         if node.id == node_id:
             return node
+    return None
+
+def find_cx_with_innovation(cxs, innovation):
+    """Returns the node with the given id from the list of nodes"""
+    for cx in cxs:
+        if cx.innovation == innovation:
+            return cx
     return None
 
 

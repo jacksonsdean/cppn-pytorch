@@ -811,6 +811,62 @@ class CPPN():
             self.adjusted_fitness = self.fitness
             print("ERROR: num_in_species was 0")
 
+
+    def crossover_(self, other):
+        """ Configure a new genome by crossover from two parent genomes. """
+        genome1 = self
+        genome2 = other
+        if genome1.fitness > genome2.fitness:
+            parent1, parent2 = genome1, genome2
+        else:
+            parent1, parent2 = genome2, genome1
+
+        child = CPPN(self.config)
+        
+        # Inherit connection genes
+        for _, cg1 in enumerate(parent1.connection_genome):
+            innovation = cg1.innovation
+            cg2 = find_cx_with_innovation(parent2.connection_genome, innovation)
+            if cg2 is None:
+                # Excess or disjoint gene: copy from the fittest parent.
+                child.connection_genome.append(copy.copy(cg1))
+            else:
+                # Homologous gene: combine genes from both parents.
+                # randomly choose which parent to copy from
+                if random.random() < 0.5:
+                    child.connection_genome.append(copy.copy(cg1))
+                else:
+                    child.connection_genome.append(copy.copy(cg2))
+
+        # Inherit node genes
+        n_inputs = len(parent1.input_nodes())
+        n_outputs = len(parent1.output_nodes())
+        child_nodes = set(
+              [copy.copy(parent1.input_nodes()[n]) if random.random()<0.5 else parent2.input_nodes()[n] for n in range(n_inputs)]\
+            + [copy.copy(parent1.output_nodes()[n]) if random.random()<0.5 else parent2.output_nodes()[n] for n in range(n_outputs)]\
+            + [cx.from_node for cx in child.connection_genome]\
+            + [cx.to_node for cx in child.connection_genome]
+        )
+        ids = []
+        child.node_genome = []
+        for node in child_nodes:
+            if node.id not in ids:
+                ids.append(node.id)
+                child.node_genome.append(node)
+            
+        
+        # parent1_set = parent1.node_genome
+        # parent2_set = parent2.node_genome
+        # for _, node in enumerate(child_nodes):
+        #     if node.id not in ids:
+        #         ids.append(node.id)
+        #         child.node_genome.append(copy.deepcopy(node))
+        #     else:
+        #         if random.random() < 0.5:
+        #             child.node_genome[child.node_genome.index(find_node_with_id(child.node_genome, node.id))] = copy.deepcopy(node)
+    
+        return child
+
     def crossover(self, other_parent):
         """Crossover with another CPPN using the method in Stanley and Miikkulainen (2007)."""
         child = CPPN(self.config) # create child
