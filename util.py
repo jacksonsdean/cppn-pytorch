@@ -10,17 +10,16 @@ from scikits import bootstrap
 import warnings
 warnings.filterwarnings("ignore") # for bootstrap CI
     
-def choose_random_function(config):
-    return random.choice(config.activations)
+# def choose_random_function(config):
+#     return random.choice(config.activations)
 
-
-def name_to_fn(name):
-    fns = inspect.getmembers(sys.modules["node_functions"])
-    fns.extend([("", None)])
-    def avg_pixel_distance_fitness():
-            pass
-    fns.extend([("avg_pixel_distance_fitness", avg_pixel_distance_fitness)])
-    return fns[[f[0] for f in fns].index(name)][1]
+# def name_to_fn(name):
+#     fns = inspect.getmembers(sys.modules["node_functions"])
+#     fns.extend([("", None)])
+#     def avg_pixel_distance_fitness():
+#             pass
+#     fns.extend([("avg_pixel_distance_fitness", avg_pixel_distance_fitness)])
+#     return fns[[f[0] for f in fns].index(name)][1]
     
 def visualize_network(individual, sample_point=None, color_mode="L", visualize_disabled=False, layout='multi', sample=False, show_weights=False, use_inp_bias=False, use_radial_distance=True, save_name=None, extra_text=None, curved=False):
     c = individual.config
@@ -30,8 +29,8 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
         individual.eval(sample_point)
             
         
-    # nodes = individual.node_genome
-    connections = individual.connection_genome
+    nodes = individual.node_genome
+    connections = individual.connection_genome.items()
 
     max_weight = c.max_weight
 
@@ -39,7 +38,7 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
     function_colors = {}
     # colors = ['r', 'g', 'b', 'c', 'm', 'y', 'orange', 'darkviolet',
     #         'hotpink', 'chocolate', 'lawngreen', 'lightsteelblue']
-    colors = ['lightsteelblue'] * len([node.activation for node in individual.node_genome])
+    colors = ['lightsteelblue'] * len([node.activation for node in individual.node_genome.values()])
     node_labels = {}
 
     node_size = 2000
@@ -47,12 +46,12 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
     # plt.figure(figsize=(7, 6), frameon=False)
     plt.subplots_adjust(left=0, bottom=0, right=1.25, top=1.25, wspace=0, hspace=0)
 
-    for i, fn in enumerate([node.activation for node in individual.node_genome]):
+    for i, fn in enumerate([node.activation for node in individual.node_genome.values()]):
         function_colors[fn.__name__] = colors[i]
     function_colors["identity"] = colors[0]
 
     fixed_positions={}
-    inputs = individual.input_nodes()
+    inputs = individual.input_nodes().values()
     
     for i, node in enumerate(inputs):
         G.add_node(node, color=function_colors[node.activation.__name__], shape='d', layer=(node.layer))
@@ -62,12 +61,12 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
             
         fixed_positions[node] = (-4,((i+1)*2.)/len(inputs))
 
-    for node in individual.hidden_nodes():
+    for node in individual.hidden_nodes().values():
         G.add_node(node, color=function_colors[node.activation.__name__], shape='o', layer=(node.layer))
         # node_labels[node] = f"{node.id}\n{node.activation.__name__}\n"+(f"{node.outputs:.3f}" if node.outputs!=None else "" )
         node_labels[node] = f"{node.id}\n{node.activation.__name__}"
 
-    for i, node in enumerate(individual.output_nodes()):
+    for i, node in enumerate(individual.output_nodes().values()):
         title = i
         G.add_node(node, color=function_colors[node.activation.__name__], shape='s', layer=(node.layer))
         # node_labels[node] = f"M{title}:\n{node.activation.__name__}\n"+(f"{node.outputs:.3f}")
@@ -100,15 +99,17 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
                             label=node_labels, node_shape=shape, nodelist=this_nodes)
 
     edge_labels = {}
-    for cx in connections:
+    for key, cx in connections:
         if(not visualize_disabled and (not cx.enabled or np.isclose(cx.weight, 0))): continue
         style = ('-', 'k',  .5+abs(cx.weight)/max_weight) if cx.enabled else ('--', 'grey', .5+ abs(cx.weight)/max_weight)
         if(cx.enabled and cx.weight<0): style  = ('-', 'r', .5+abs(cx.weight)/max_weight)
-        if cx.from_node in G.nodes and cx.to_node in G.nodes:
-            G.add_edge(cx.from_node, cx.to_node, weight=f"{cx.weight:.4f}", pos=pos, style=style)
+        from_node = nodes[key[0]]
+        to_node = nodes[key[1]]
+        if from_node in G.nodes and to_node in G.nodes:
+            G.add_edge(from_node, to_node, weight=f"{cx.weight:.4f}", pos=pos, style=style)
         else:
-            print("Connection not in graph:", cx.from_node.id, "->", cx.to_node.id)
-        edge_labels[(cx.from_node, cx.to_node)] = f"{cx.weight:.3f}"
+            print("Connection not in graph:", from_node.id, "->", to_node.id)
+        edge_labels[(from_node, to_node)] = f"{cx.weight:.3f}"
 
 
     edge_colors = nx.get_edge_attributes(G,'color').values()
@@ -312,137 +313,3 @@ def get_avg_number_of_connections(population):
     for g in population:
         count+=len(list(g.enabled_connections()))
     return count/len(population)
-
-def get_candidate_nodes(s, connections):
-    """Find candidate nodes c for the next layer.  These nodes should connect
-    a node in s to a node not in s."""
-    return set(b for (a, b) in connections if a in s and b not in s)
-
-
-def get_incoming_connections(individual, node):
-    """Given an individual and a node, returns the connections in individual that end at the node"""
-    return list(filter(lambda x, n=node: x.to_node.id == n.id,
-               individual.enabled_connections()))  # cxs that end here
-
-def get_ids_from_individual(individual):
-    """Gets the ids from a given individual
-
-    Args:
-        individual (CPPN): The individual to get the ids from.
-
-    Returns:
-        tuple: (inputs, outputs, connections) the ids of the CPPN's nodes
-    """
-    inputs = [n.id for n in individual.input_nodes()]
-    outputs = [n.id for n in individual.output_nodes()]
-    connections = [(c.from_node.id, c.to_node.id)
-                   for c in individual.enabled_connections()]
-    return inputs, outputs, connections
-
-###############################################################################################
-# Methods below are from the NEAT-Python package https://github.com/CodeReclaimers/neat-python/
-
-# LICENSE:
-# Copyright (c) 2007-2011, cesar.gomes and mirrorballu2
-# Copyright (c) 2015-2019, CodeReclaimers, LLC
-#
-# Redistribution and use in source and binary forms, with or without modification,
-# are permitted provided that the
-# following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice, this list of
-# conditions and the following
-# disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice, this list
-# of conditions and the following
-# disclaimer in the documentation and/or other materials provided with the distribution.
-#
-# 3. Neither the name of the copyright holder nor the names of its contributors may be
-# used to endorse or promote products
-# derived from this software without specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS
-# OR IMPLIED WARRANTIES,
-# INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-# PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT,
-# INDIRECT, INCIDENTAL,
-# SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES;
-# LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-# LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
-# OF THE USE OF THIS
-# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-###############################################################################################
-
-
-def required_for_output(inputs, outputs, connections):
-    """
-    Collect the nodes whose state is required to compute the final network output(s).
-    :param inputs: list of the input identifiers
-    :param outputs: list of the output node identifiers
-    :param connections: list of (input, output) connections in the network.
-    NOTE: It is assumed that the input identifier set and the node identifier set are disjoint.
-    By convention, the output node ids are always the same as the output index.
-
-    Returns a set of identifiers of required nodes.
-    From: https://neat-python.readthedocs.io/en/latest/_modules/graphs.html
-    """
-
-    required = set(outputs)
-    s = set(outputs)
-    while 1:
-        # Find nodes not in S whose output is consumed by a node in s.
-        t = set(a for (a, b) in connections if b in s and a not in s)
-
-        if not t:
-            break
-
-        layer_nodes = set(x for x in t if x not in inputs)
-        if not layer_nodes:
-            break
-
-        required = required.union(layer_nodes)
-        s = s.union(t)
-
-    return required
-
-
-def feed_forward_layers(individual):
-    """
-    Collect the layers whose members can be evaluated in parallel in a feed-forward network.
-    :param inputs: list of the network input nodes
-    :param outputs: list of the output node identifiers
-    :param connections: list of (input, output) connections in the network.
-
-    Returns a list of layers, with each layer consisting of a set of node identifiers.
-    Note that the returned layers do not contain nodes whose output is ultimately
-    never used to compute the final network output.
-
-    Modified from: https://neat-python.readthedocs.io/en/latest/_modules/graphs.html
-    """
-
-    inputs, outputs, connections = get_ids_from_individual(individual)
-
-    required = required_for_output(inputs, outputs, connections)
-
-    layers = []
-    s = set(inputs)
-    while 1:
-
-        c = get_candidate_nodes(s, connections)
-        # Keep only the used nodes whose entire input set is contained in s.
-        t = set()
-        for n in c:
-            if n in required and all(a in s for (a, b) in connections if b == n):
-                t.add(n)
-
-        if not t:
-            break
-
-        layers.append(t)
-        s = s.union(t)
-
-    return layers

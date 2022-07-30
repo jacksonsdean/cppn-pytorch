@@ -1,6 +1,7 @@
 """Contains the CPPN, Node, and Connection classes."""
 import copy
 from enum import IntEnum
+from itertools import count
 import math
 import json
 from typing import Callable
@@ -39,9 +40,42 @@ class NodeType(IntEnum):
     OUTPUT = 1
     HIDDEN = 2
 
-class Node:
-    """Represents a node in the CPPN."""
+class Gene(object):
+    """Represents either a node or connection in the CPPN"""
+    def __init__(self) -> None:
+        pass
+    def copy(self):
+        new_gene = self.__class__(self.key)
+        for name, value in self._gene_attributes:
+            setattr(new_gene, name, value)
 
+        return new_gene
+
+    @property
+    def key(self):
+        raise NotImplementedError
+    @property
+    def _gene_attributes(self) -> list:
+        """A list of tuples of the form (name, value)"""
+        raise NotImplementedError
+    
+    def crossover(self, other):
+        assert self.key == other.key,\
+            f"Cannot crossover genes with different keys {self.key!r} and {other.key!r}"
+        new_gene = self.__class__(self.key)
+
+        for name, value in self._gene_attributes:
+            if torch.rand(1)[0] < 0.5:
+                setattr(new_gene, name, value)
+            else:
+                setattr(new_gene, name, getattr(other, name))
+
+        return new_gene
+    
+class Node(Gene):
+    """Represents a node in the CPPN."""
+    # TODO: aggregation function, bias, response(?)
+    
     @staticmethod
     def create_from_json(json_dict):
         """Constructs a node from a json dict or string."""
@@ -52,21 +86,29 @@ class Node:
     @staticmethod
     def empty():
         """Returns an empty node."""
-        return Node(identity, NodeType.HIDDEN, 0, 0)
+        return Node(0, identity, NodeType.HIDDEN, 0)
 
-    def __init__(self, activation, _type, _id, _layer=999) -> None:
+    def __init__(self, key, activation=None, _type=2, _layer=999) -> None:
         self.activation = activation
-        self.id = _id
+        self.id = key
         self.type = _type
         self.layer = _layer
         self.sum_inputs = None
         self.outputs = None
-
-    def activate(self, incoming_connections):
+        super().__init__()
+    
+    @property
+    def key(self):
+        return self.id
+    @property
+    def _gene_attributes(self):
+        return [('activation', self.activation), ('type', self.type)]
+    
+    def activate(self, incoming_connections, nodes):
         """Activates the node given a list of connections that end here."""
         for cx in incoming_connections:
-            if cx.from_node.outputs is not None:
-                inputs = cx.from_node.outputs * cx.weight
+            if nodes[cx.key[0]] is not None:
+                inputs = nodes[cx.key[0]].outputs * cx.weight
                 self.sum_inputs = self.sum_inputs + inputs
         
         self.outputs = self.activation(self.sum_inputs)  # apply activation
@@ -79,7 +121,7 @@ class Node:
         """Makes the node serializable."""
         self.type = self.type.value if isinstance(self.type, NodeType) else self.type
         self.id = int(self.id)
-        self.layer = int(self.id)
+        self.layer = int(self.layer)
         self.sum_inputs = None
         self.outputs = None
         try:
@@ -108,35 +150,45 @@ class Node:
         assert isinstance(self.activation, Callable), "activation function is not a function"
         return self
 
-class Connection:
+class Connection(Gene):
     """
     Represents a connection between two nodes.
 
     where innovation number is the same for all of same connection
     i.e. 2->5 and 2->5 have same innovation number, regardless of individual
     """
-    innovations = []
+    # innovations = []
 
-    @staticmethod
-    def get_innovation(from_node, to_node):
-        """Returns the innovation number for the connection."""
-        connection_from_to = (from_node.id, to_node.id) # based on id
+    # @staticmethod
+    # def get_innovation(key:tuple):
+    #     """Returns the innovation number for the connection."""
+    #     connection_from_to = key # based on id
 
-        if connection_from_to in Connection.innovations:
-            return Connection.innovations.index(connection_from_to)
+    #     if connection_from_to in Connection.innovations:
+    #         return Connection.innovations.index(connection_from_to)
 
-        Connection.innovations.append(connection_from_to)
-        return len(Connection.innovations) - 1
+    #     Connection.innovations.append(connection_from_to)
+    #     return len(Connection.innovations) - 1
 
-    def __init__(self, from_node, to_node, weight, enabled = True) -> None:
+    # def __init__(self, from_node, to_node, weight, enabled = True) -> None:
+    def __init__(self, key, weight = None, enabled = True) -> None:
         # Initialize
-        self.from_node = from_node
-        self.to_node = to_node
+        self.key_ = key
         self.weight = weight
-        self.innovation = Connection.get_innovation(from_node, to_node)
+        # self.innovation = Connection.get_innovation(key)
         self.enabled = enabled
-        self.is_recurrent = to_node.layer < from_node.layer
-
+        # self.is_recurrent = to_node.layer < from_node.layer
+        self.is_recurrent = False # TODO
+        super().__init__()
+        
+    @property
+    def key(self):
+        assert type(self.key_) is tuple, "key is not a tuple"
+        return self.key_
+    @property
+    def _gene_attributes(self):
+        return [('weight', self.weight), ('enabled', self.enabled)]
+    
     def serialize(self):
         self.weight = float(self.weight)
     def deserialize(self):
@@ -144,11 +196,11 @@ class Connection:
     
     def to_json(self):
         """Converts the connection to a json string."""
-        self.innovation = int(self.innovation)
-        if isinstance(self.from_node, Node):
-            self.from_node = self.from_node.to_json()
-        if isinstance(self.to_node, Node):
-            self.to_node = self.to_node.to_json()
+        # self.innovation = int(self.innovation)
+        # if isinstance(self.from_node, Node):
+            # self.from_node = self.from_node.to_json()
+        # if isinstance(self.to_node, Node):
+            # self.to_node = self.to_node.to_json()
         return json.dumps(self.__dict__)
 
     def from_json(self, json_dict):
@@ -156,24 +208,24 @@ class Connection:
         if isinstance(json_dict, str):
             json_dict = json.loads(json_dict, strict=False)
         self.__dict__ = json_dict
-        self.from_node = Node.create_from_json(self.from_node)
-        self.to_node = Node.create_from_json(self.to_node)
+        # self.from_node = Node.create_from_json(self.from_node)
+        # self.to_node = Node.create_from_json(self.to_node)
         return self
 
     @staticmethod
     def create_from_json(json_dict):
         """Constructs a connection from a json dict or string."""
-        f_node = Node.empty()
-        t_node = Node.empty()
-        i = Connection(f_node, t_node, 0)
+        # f_node = Node.empty()
+        # t_node = Node.empty()
+        i = Connection((-1,-1), 0)
         i.from_json(json_dict)
         return i
 
     def __str__(self):
         return self.__repr__()
     def __repr__(self):
-        return f"([{self.from_node.id}->{self.to_node.id}]"+\
-            f"I:{self.innovation} W:{self.weight:3f} E:{self.enabled} R:{self.is_recurrent})"
+        return f"([{self.key[0]}->{self.key[1]}]"+\
+            f"W:{self.weight:3f} E:{self.enabled} R:{self.is_recurrent})"
 
 
 class CPPN():
@@ -181,6 +233,8 @@ class CPPN():
 
     pixel_inputs = torch.zeros((0, 0, 0)) # (res_h, res_w, n_inputs)
     current_id = 0
+    node_indexer = None
+    
     
     @staticmethod
     def initialize_inputs(res_h, res_w, use_radial_dist, use_bias, n_inputs,device ):
@@ -211,11 +265,11 @@ class CPPN():
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.config = config
         self.image = None
-        self.node_genome = []  # inputs first, then outputs, then hidden
-        self.connection_genome = []
+        self.node_genome = {}
+        self.connection_genome = {}
         self.selected = False
         self.species_id = 0
-        self.id = 0
+        self.id = None
         
         torch.manual_seed(config.seed)
 
@@ -240,59 +294,82 @@ class CPPN():
     def get_id():
         CPPN.current_id += 1
         return CPPN.current_id - 1
+
+    def get_new_node_id(self):
+        """Returns a new node id`."""
+        if CPPN.node_indexer is None:
+            if self.node_genome == {}:
+                return 0
+            if self.node_genome is not None:
+                CPPN.node_indexer = count(max(list(self.node_genome)) + 1)
+            else:
+                CPPN.node_indexer = count(max(list(self.node_genome)) + 1)
+
+        new_id = next(CPPN.node_indexer)
+        assert new_id not in self.node_genome.keys()
+        return new_id
     
     def set_id(self, id):
         self.id = id
         
-    def initialize_connection_genome(self):
-        """Initializes the connection genome."""
-        output_layer = self.node_genome[self.n_inputs].layer
-
-        for layer_index in range(0, output_layer):
-            layer_from = self.get_layer(layer_index)
-            for _, from_node in enumerate(layer_from):
-                layer_to = self.get_layer(layer_index+1)
-                for _, to_node in enumerate(layer_to):
-                    new_cx = Connection(
-                        from_node, to_node, self.random_weight())
-                    self.connection_genome.append(new_cx)
-                    if torch.rand(1)[0] > self.config.init_connection_probability:
-                        new_cx.enabled = False
-
     def initialize_node_genome(self):
         """Initializes the node genome."""
         total_node_count = self.n_inputs + \
             self.n_outputs + self.config.hidden_nodes_at_start
         for _ in range(self.n_inputs):
-            self.node_genome.append(
-                Node(identity, NodeType.INPUT, self.get_new_node_id(), 0))
+            new_node = Node(self.get_new_node_id(), identity, NodeType.INPUT, 0)
+            self.node_genome[new_node.key] = new_node
+            
         for _ in range(self.n_inputs, self.n_inputs + self.n_outputs):
             if self.config.output_activation is None:
                 output_fn = choose_random_function(self.config)
             else:
                 output_fn = self.config.output_activation
-            self.node_genome.append(
-                Node(output_fn, NodeType.OUTPUT, self.get_new_node_id(), 2))
+            new_node = Node(self.get_new_node_id(), output_fn, NodeType.OUTPUT, 2)
+            self.node_genome[new_node.key] = new_node
+            
         for _ in range(self.n_inputs + self.n_outputs, total_node_count):
-            self.node_genome.append(Node(choose_random_function(self.config), NodeType.HIDDEN,
-                self.get_new_node_id(), 1))
+            new_node = Node(self.get_new_node_id(), choose_random_function(self.config),
+                            NodeType.HIDDEN, 1)
+            self.node_genome[new_node.key] = new_node
+     
+     
+    def get_output_layer_index(self):
+        for n in self.node_genome.values():
+            if n.type == NodeType.OUTPUT:
+                return n.layer
+        assert False, "No output layer found"
     
+    def initialize_connection_genome(self):
+        """Initializes the connection genome."""
+        output_layer_idx = self.get_output_layer_index()
+        for layer_index in range(0, output_layer_idx+1):
+            for layer_to_index in range(layer_index, output_layer_idx+1):
+                if layer_index != layer_to_index:
+                    for from_node in self.get_layer(layer_index):
+                        for to_node in self.get_layer(layer_to_index):
+                            new_cx = Connection(
+                                (from_node.id, to_node.id), self.random_weight())
+                            self.connection_genome[new_cx.key] = new_cx
+                            if torch.rand(1)[0] > self.config.init_connection_probability:
+                                new_cx.enabled = False
+        
     def serialize(self):
         del CPPN.pixel_inputs
         CPPN.pixel_inputs = None
         if self.image is not None:
             self.image = self.image.cpu().numpy().tolist() if\
                 isinstance(self.image, torch.Tensor) else self.image
-        for node in self.node_genome:
+        for _, node in self.node_genome.items():
             node.serialize()
-        for connection in self.connection_genome:
+        for _, connection in self.connection_genome.items():
             connection.serialize()
         self.config.serialize()
 
     def deserialize(self):
-        for node in self.node_genome:
+        for _, node in self.node_genome.items():
             node.deserialize()
-        for connection in self.connection_genome:
+        for _, connection in self.connection_genome.items():
             connection.deserialize()
         self.config.deserialize()
         
@@ -301,10 +378,10 @@ class CPPN():
         self.serialize()
         img = json.dumps(self.image) if self.image is not None else None
         # make copies to keep the CPPN intact
-        copy_of_nodes = copy.deepcopy(self.node_genome)
-        copy_of_connections = copy.deepcopy(self.connection_genome)
-        return {"node_genome": [n.to_json() for n in copy_of_nodes], "connection_genome":\
-            [c.to_json() for c in copy_of_connections], "image": img, "selected": self.selected}
+        copy_of_nodes = copy.deepcopy(self.node_genome).items()
+        copy_of_connections = copy.deepcopy(self.connection_genome).items()
+        return {"node_genome": [n.to_json() for _,n in copy_of_nodes], "connection_genome":\
+            [c.to_json() for _,c in copy_of_connections], "image": img, "selected": self.selected}
 
     def from_json(self, json_dict):
         """Constructs a CPPN from a json dict or string."""
@@ -314,24 +391,24 @@ class CPPN():
             setattr(self, key, value)
        
        # connections
-        for i, cx in enumerate(self.connection_genome):
-            self.connection_genome[i] = Connection.create_from_json(cx) if\
+        for key, cx in self.connection_genome.items():
+            self.connection_genome[key] = Connection.create_from_json(cx) if\
                 isinstance(cx, (dict,str)) else cx
-            assert isinstance(self.connection_genome[i], Connection),\
-                f"Connection is a {type(self.connection_genome[i])}: {self.connection_genome[i]}"
+            assert isinstance(self.connection_genome[key], Connection),\
+                f"Connection is a {type(self.connection_genome[key])}: {self.connection_genome[key]}"
        
        # nodes
-        for i, n in enumerate(self.node_genome):
-            self.node_genome[i] = Node.create_from_json(n) if\
-                isinstance(n, (dict,str)) else n
+        for key, node in self.node_genome.items():
+            self.node_genome[key] = Node.create_from_json(node) if\
+                isinstance(node, (dict,str)) else node
 
-            assert isinstance(self.node_genome[i], Node),\
-                f"Node is a {type(self.node_genome[i])}: {self.node_genome[i]}"
+            assert isinstance(self.node_genome[key], Node),\
+                f"Node is a {type(self.node_genome[key])}: {self.node_genome[key]}"
         
         # make sure references are correct
-        for cx in self.connection_genome:
-            cx.from_node = find_node_with_id(self.node_genome, cx.from_node.id)
-            cx.to_node = find_node_with_id(self.node_genome, cx.to_node.id)
+        # for key, cx in self.connection_genome.items():
+        #     cx.from_node = find_node_with_id(self.node_genome, cx.from_node.id)
+        #     cx.to_node = find_node_with_id(self.node_genome, cx.to_node.id)
 
         self.update_node_layers()
         CPPN.initialize_inputs(self.config.res_h, self.config.res_w,
@@ -351,29 +428,23 @@ class CPPN():
         """Returns a random weight between -max_weight and max_weight."""
         return random_uniform(-self.config.max_weight, self.config.max_weight, self.device)
 
-    def get_new_node_id(self):
-        """Returns a new node id."""
-        new_id = 0
-        while len(self.node_genome) > 0 and new_id in [node.id for node in self.node_genome]:
-            new_id += 1
-        return new_id
-
     def enabled_connections(self):
         """Returns a yield of enabled connections."""
-        for connection in self.connection_genome:
+        for key, connection in self.connection_genome.items():
             if connection.enabled:
                 yield connection
 
     def mutate_activations(self, prob):
         """Mutates the activation functions of the nodes."""
-        eligible_nodes = list(self.hidden_nodes())
+        eligible_nodes = list(self.hidden_nodes().values())
         if self.config.output_activation is None:
-            eligible_nodes.extend(self.output_nodes())
+            eligible_nodes.extend(self.output_nodes().values())
         if self.config.allow_input_activation_mutation:
-            eligible_nodes.extend(self.input_nodes())
+            eligible_nodes.extend(self.input_nodes().values())
         for node in eligible_nodes:
-            if random_uniform(0,1) < self.config.prob_mutate_activation:
+            if random_uniform(0,1) < prob:
                 node.activation = choose_random_function(self.config)
+        self.image = None # reset the image
 
     def mutate_weights(self, prob):
         """
@@ -381,7 +452,7 @@ class CPPN():
         adding a floating point number chosen from a uniform distribution of
         positive and negative values """
 
-        for connection in self.connection_genome:
+        for _, connection in self.connection_genome.items():
             if random_uniform(0, 1) < prob:
                 connection.weight += random_uniform(-self.config.weight_mutation_max,
                                                self.config.weight_mutation_max, device=self.device)
@@ -389,6 +460,8 @@ class CPPN():
                 connection.weight = self.random_weight()
 
         self.clamp_weights()
+        self.image = None # reset the image
+        
 
     def mutate(self, rates=None):
         """Mutates the CPPN based on its config or the optionally provided rates."""
@@ -399,8 +472,8 @@ class CPPN():
             add_connection = self.config.prob_add_connection
             remove_node = self.config.prob_remove_node
             disable_connection = self.config.prob_disable_connection
-            mutate_weights = self.config.prob_mutate_weights
-            mutate_activations = self.config.prob_mutate_activations
+            mutate_weights = self.config.prob_mutate_weight
+            mutate_activations = self.config.prob_mutate_activation
         else:
             mutate_activations, mutate_weights, add_connection, add_node, remove_node, disable_connection, weight_mutation_max, prob_reenable_connection = rates
         if random_uniform(0,1) < add_node:
@@ -416,25 +489,24 @@ class CPPN():
         self.mutate_weights(mutate_weights)
         self.update_node_layers()
         self.disable_invalid_connections()
+        self.image = None # reset the image
+        
 
     def disable_invalid_connections(self):
         """Disables connections that are not compatible with the current configuration."""
-        for connection in self.connection_genome:
+        for key, connection in self.connection_genome.items():
             if connection.enabled:
-                if not is_valid_connection(connection.from_node, connection.to_node, self.config):
+                if not is_valid_connection(self.node_genome, connection.key, self.config):
                     connection.enabled = False
 
     def add_connection(self):
         """Adds a connection to the CPPN."""
         for _ in range(20):  # try 20 times max
             [from_node, to_node] = random_choice(
-                self.node_genome, 2, replace=False)
+                list(self.node_genome.values()), 2, replace=False)
 
             # look to see if this connection already exists
-            existing_cx = None
-            for cx in self.connection_genome:
-                if cx.from_node == from_node and cx.to_node == to_node:
-                    existing_cx = cx
+            existing_cx = self.connection_genome.get((from_node.id, to_node.id))
 
             # if it does exist and it is disabled, there is a chance to reenable
             if existing_cx is not None:
@@ -444,14 +516,17 @@ class CPPN():
                 break  # don't allow duplicates, don't enable more than one connection
 
             # else if it doesn't exist, check if it is valid
-            if is_valid_connection(from_node, to_node, self.config):
+            if is_valid_connection(self.node_genome, (from_node.id, to_node.id), self.config):
                 # valid connection, add
-                new_cx = Connection(from_node, to_node, self.random_weight())
-                self.connection_genome.append(new_cx)
+                new_cx = Connection((from_node.id, to_node.id), self.random_weight())
+                assert new_cx.key not in self.connection_genome.keys(),\
+                    "CX already exists: {}".format(new_cx.key)
+                self.connection_genome[new_cx.key] = new_cx
                 self.update_node_layers()
                 break # found a valid connection, don't add more than one
 
             # else failed to find a valid connection, don't add and try again
+        self.image = None # reset the image
 
     def add_node(self):
         """Adds a node to the CPPN.
@@ -460,7 +535,7 @@ class CPPN():
         """
         # only add nodes in the middle of non-recurrent connections
         eligible_cxs = [
-            cx for cx in self.connection_genome if not cx.is_recurrent]
+            cx for k, cx in self.connection_genome.items() if not cx.is_recurrent]
 
         if len(eligible_cxs) == 0:
             return # there are no eligible connections, don't add a node
@@ -469,9 +544,13 @@ class CPPN():
         old_connection = random_choice(eligible_cxs,1,replace=False)[0]
 
         # create the new node
-        new_node = Node(choose_random_function(self.config),
-                        NodeType.HIDDEN, self.get_new_node_id(), 999)
-        self.node_genome.append(new_node)  # add a new node between two nodes
+        new_node = Node(self.get_new_node_id(), choose_random_function(self.config),
+                        NodeType.HIDDEN, 999)
+        
+        assert new_node.id not in self.node_genome.keys(),\
+            "Node ID already exists: {}".format(new_node.id)
+            
+        self.node_genome[new_node.id] =  new_node # add a new node between two nodes
 
         # disable old connection
         old_connection.enabled = False
@@ -480,41 +559,42 @@ class CPPN():
         # new node is given a weight of one and the connection between
         # the new node and the last node in the chain
         # is given the same weight as the connection being split
-        self.connection_genome.append(Connection(
-            find_node_with_id(self.node_genome, old_connection.from_node.id),
-            find_node_with_id(self.node_genome, new_node.id),
-            1.0))
+        new_cx_1 = Connection(
+            (old_connection.key[0], new_node.id), 1.0)
+        assert new_cx_1.key not in self.connection_genome.keys()
+        self.connection_genome[new_cx_1.key] = new_cx_1
 
-        self.connection_genome.append(Connection(
-            find_node_with_id(self.node_genome, new_node.id),
-            find_node_with_id(self.node_genome, old_connection.to_node.id),
-            old_connection.weight))
-
+        new_cx_2 = Connection((new_node.id, old_connection.key[1]),
+            old_connection.weight)
+        assert new_cx_2.key not in self.connection_genome.keys()
+        self.connection_genome[new_cx_2.key] = new_cx_2
 
         self.update_node_layers() # update the layers of the nodes
-
+        self.image = None # reset the image
+        
     def remove_node(self):
         """Removes a node from the CPPN.
             Only hidden nodes are eligible to be removed.
         """
 
-        hidden = self.hidden_nodes()
+        hidden = self.hidden_nodes().values()
         if len(hidden) == 0:
             return # no eligible nodes, don't remove a node
 
         # choose a random node
         node_id_to_remove = random_choice([n.id for n in hidden], 1, False)[0]
 
-        for cx in self.connection_genome[::-1]:
-            if node_id_to_remove in [cx.from_node.id, cx.to_node.id]:
-                self.connection_genome.remove(cx)
-        for node in self.node_genome[::-1]:
+        for key, cx in list(self.connection_genome.items())[::-1]:
+            if node_id_to_remove in cx.key:
+                del self.connection_genome[key]
+        for key, node in list(self.node_genome.items())[::-1]:
             if node.id == node_id_to_remove:
-                self.node_genome.remove(node)
+                del self.node_genome[key]
                 break
 
         self.update_node_layers()
         self.disable_invalid_connections()
+        self.image = None # reset the image
 
     def disable_connection(self):
         """Disables a connection."""
@@ -523,29 +603,29 @@ class CPPN():
             return
         cx = random_choice(eligible_cxs, 1, False)[0]
         cx.enabled = False
+        self.image = None # reset the image
 
     def update_node_layers(self) -> int:
         """Update the node layers."""
         layers = feed_forward_layers(self)
-
-        for _, node in enumerate(self.input_nodes()):
+        for _, node in self.input_nodes().items():
             node.layer = 0
         for layer_index, layer in enumerate(layers):
-            for _, node_id in enumerate(layer):
+            for node_id in layer:
                 node = find_node_with_id(self.node_genome, node_id)
                 node.layer = layer_index + 1
 
-    def input_nodes(self) -> list:
-        """Returns a list of all input nodes."""
-        return list(filter(lambda n: n.type == NodeType.INPUT, self.node_genome))
+    def input_nodes(self) -> dict:
+        """Returns a dict of all input nodes."""
+        return {n.id: n for n in self.node_genome.values() if n.type == NodeType.INPUT}
 
-    def output_nodes(self) -> list:
-        """Returns a list of all output nodes."""
-        return list(filter(lambda n: n.type == NodeType.OUTPUT, self.node_genome))
+    def output_nodes(self) -> dict:
+        """Returns a dict of all output nodes."""
+        return {n.id: n for n in self.node_genome.values() if n.type == NodeType.OUTPUT}
 
-    def hidden_nodes(self) -> list:
-        """Returns a list of all hidden nodes."""
-        return list(filter(lambda n: n.type == NodeType.HIDDEN, self.node_genome))
+    def hidden_nodes(self) -> dict:
+        """Returns a dict of all hidden nodes."""
+        return {n.id: n for n in self.node_genome.values() if n.type == NodeType.HIDDEN}
 
     def set_inputs(self, inputs):
         """Sets the input neurons outputs to the input values."""
@@ -555,21 +635,21 @@ class CPPN():
         if self.config.use_input_bias:
             inputs.append(1.0)  # bias = 1.0
 
-        for i, inp in enumerate(inputs):
+        for inp, node in zip(inputs, self.input_nodes().values()):
             # inputs are first N nodes
-            self.node_genome[i].sum_input = inp
-            self.node_genome[i].output = self.node_genome[i].activation(inp)
+            node.sum_input = inp
+            node.output = node.activation(inp)
 
-    def get_layer(self, layer_index):
+    def get_layer(self, layer_index) -> list:
         """Returns a list of nodes in the given layer."""
-        for node in self.node_genome:
+        for _, node in self.node_genome.items():
             if node.layer == layer_index:
                 yield node
 
-    def get_layers(self):
+    def get_layers(self) -> dict:
         """Returns a dictionary of lists of nodes in each layer."""
         layers = {}
-        for node in self.node_genome:
+        for _, node in self.node_genome.items():
             if node.layer not in layers:
                 layers[node.layer] = []
             layers[node.layer].append(node)
@@ -577,18 +657,18 @@ class CPPN():
 
     def clamp_weights(self):
         """Clamps all weights to the range [-max_weight, max_weight]."""
-        for cx in self.connection_genome:
+        for _, cx in self.connection_genome.items():
             if cx.weight < self.config.weight_threshold and cx.weight >\
                  -self.config.weight_threshold:
-                cx.weight = 0
-            if cx.weight > self.config.max_weight:
-                cx.weight = self.config.max_weight
-            if cx.weight < -self.config.max_weight:
-                cx.weight = -self.config.max_weight
+                cx.weight = torch.tensor(0.0)
+            if not isinstance(cx.weight, torch.Tensor):
+                cx.weight = torch.tensor(cx.weight)
+            cx.weight = torch.clamp(cx.weight, -self.config.max_weight, self.config.max_weight)
+            
 
     def reset_activations(self):
         """Resets all node activations to zero."""
-        for node in self.node_genome:
+        for _, node in self.node_genome.items():
             node.sum_inputs = torch.ones((self.config.res_h, self.config.res_w), device=self.device)/2.0
             node.outputs = torch.ones((self.config.res_h, self.config.res_w), device=self.device)/2.0
 
@@ -600,19 +680,12 @@ class CPPN():
     def feed_forward(self):
         """Feeds forward the network."""
         if self.config.allow_recurrent:
-            for i in range(self.n_inputs):
+            for _, input_node in self.input_nodes().items():
                 # input nodes (handle recurrent)
-                for node_input in list(filter(lambda x,
-                    index=i: x.to_node.id == self.node_genome[index].id,
-                    self.enabled_connections())):
-                    self.node_genome[i].sum_input +=\
-                        node_input.from_node.outputs * node_input.weight
-
-                self.node_genome[i].outputs =\
-                    self.node_genome[i].activation(self.node_genome[i].sum_input)
+                input_node.activate(get_incoming_connections(self, input_node), self.node_genome)
 
         # always an output node
-        output_layer = self.node_genome[self.n_inputs].layer
+        output_layer = self.get_output_layer_index()
 
         for layer_index in range(1, output_layer+1):
             # hidden and output layers:
@@ -620,13 +693,7 @@ class CPPN():
             for node in layer:
                 node.sum_input = 0
                 node.outputs = 0
-                node_inputs = list(
-                    filter(lambda x, n=node: x.to_node.id == n.id,
-                        self.enabled_connections()))  # cxs that end here
-                for cx in node_inputs:
-                    node.sum_input += cx.from_node.outputs * cx.weight
-
-                node.outputs = node.activation(node.sum_input)  # apply activation
+                node.activate(get_incoming_connections(self, node), self.node_genome)
                 # node.outputs = np.clip(node.outputs, -1, 1) # clip output
 
         return [node.outputs for node in self.output_nodes()]
@@ -694,8 +761,7 @@ class CPPN():
         self.reset_activations()
 
         layers = feed_forward_layers(self) # get layers
-        layers.insert(0, [n.id for n in self.input_nodes()]) # add input nodes as first layer
-
+        layers.insert(0, self.input_nodes().keys()) # add input nodes as first layer
         for layer in layers:
             # iterate over layers
             for node_index, node_id in enumerate(layer):
@@ -713,10 +779,10 @@ class CPPN():
 
                 node.initialize_sum(starting_input)
                 # initialize the sum_inputs for this node
-                node.activate(node_inputs)
+                node.activate(node_inputs, self.node_genome)
 
         # collect outputs from the last layer
-        outputs = torch.stack([node.outputs for node in self.output_nodes()])
+        outputs = torch.stack([node.outputs for node in self.output_nodes().values()])
 
         # reshape the outputs to image shape
         if len(self.config.color_mode)>2:
@@ -747,12 +813,12 @@ class CPPN():
     def genetic_difference(self, other) -> float:
         # only enabled connections, sorted by innovation id
         this_cxs = sorted(self.enabled_connections(),
-                          key=lambda c: c.innovation)
+                          key=lambda c: c.key)
         other_cxs = sorted(other.enabled_connections(),
-                           key=lambda c: c.innovation)
+                           key=lambda c: c.key)
 
         N = max(len(this_cxs), len(other_cxs))
-        other_innovation = [c.innovation for c in other_cxs]
+        other_innovation = [c.key for c in other_cxs]
 
         # number of excess connections
         n_excess = len(get_excess_connections(this_cxs, other_innovation))
@@ -776,7 +842,7 @@ class CPPN():
         # includes an additional argument that counts how many
         # activation functions differ between the two individuals
         n_different_fns = 0
-        for t_node, o_node in zip(self.node_genome, other.node_genome):
+        for t_node, o_node in zip(self.node_genome.values(), other.node_genome.values()):
             if(t_node.activation.__name__ != o_node.activation.__name__):
                 n_different_fns += 1
 
@@ -812,62 +878,43 @@ class CPPN():
             print("ERROR: num_in_species was 0")
 
 
-    def crossover_(self, other):
+    def crossover(self, other):
         """ Configure a new genome by crossover from two parent genomes. """
-        genome1 = self
-        genome2 = other
+        child = CPPN(self.config, {}, {})
+        genome1, genome2 = self, other
+        
         if genome1.fitness > genome2.fitness:
             parent1, parent2 = genome1, genome2
         else:
             parent1, parent2 = genome2, genome1
 
-        child = CPPN(self.config)
-        
         # Inherit connection genes
-        for _, cg1 in enumerate(parent1.connection_genome):
-            innovation = cg1.innovation
-            cg2 = find_cx_with_innovation(parent2.connection_genome, innovation)
+        for key, cg1 in parent1.connection_genome.items():
+            cg2 = parent2.connection_genome.get(key)
             if cg2 is None:
                 # Excess or disjoint gene: copy from the fittest parent.
-                child.connection_genome.append(copy.copy(cg1))
+                child.connection_genome[key] = cg1.copy()
             else:
                 # Homologous gene: combine genes from both parents.
-                # randomly choose which parent to copy from
-                if random.random() < 0.5:
-                    child.connection_genome.append(copy.copy(cg1))
-                else:
-                    child.connection_genome.append(copy.copy(cg2))
+                child.connection_genome[key] = cg1.crossover(cg2)
 
         # Inherit node genes
-        n_inputs = len(parent1.input_nodes())
-        n_outputs = len(parent1.output_nodes())
-        child_nodes = set(
-              [copy.copy(parent1.input_nodes()[n]) if random.random()<0.5 else parent2.input_nodes()[n] for n in range(n_inputs)]\
-            + [copy.copy(parent1.output_nodes()[n]) if random.random()<0.5 else parent2.output_nodes()[n] for n in range(n_outputs)]\
-            + [cx.from_node for cx in child.connection_genome]\
-            + [cx.to_node for cx in child.connection_genome]
-        )
-        ids = []
-        child.node_genome = []
-        for node in child_nodes:
-            if node.id not in ids:
-                ids.append(node.id)
-                child.node_genome.append(node)
-            
-        
-        # parent1_set = parent1.node_genome
-        # parent2_set = parent2.node_genome
-        # for _, node in enumerate(child_nodes):
-        #     if node.id not in ids:
-        #         ids.append(node.id)
-        #         child.node_genome.append(copy.deepcopy(node))
-        #     else:
-        #         if random.random() < 0.5:
-        #             child.node_genome[child.node_genome.index(find_node_with_id(child.node_genome, node.id))] = copy.deepcopy(node)
-    
+        parent1_set = parent1.node_genome
+        parent2_set = parent2.node_genome
+
+        for key, ng1 in parent1_set.items():
+            ng2 = parent2_set.get(key)
+            assert key not in child.node_genome
+            if ng2 is None:
+                # Extra gene: copy from the fittest parent
+                child.node_genome[key] = ng1.copy()
+            else:
+                # Homologous gene: combine genes from both parents.
+                child.node_genome[key] = ng1.crossover(ng2)
+        child.update_node_layers()
         return child
 
-    def crossover(self, other_parent):
+    def crossover_(self, other_parent):
         """Crossover with another CPPN using the method in Stanley and Miikkulainen (2007)."""
         child = CPPN(self.config) # create child
 

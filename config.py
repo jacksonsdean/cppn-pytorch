@@ -47,10 +47,10 @@ class   Config:
         
         # NEAT specific parameters
         self.use_speciation = True
-        self.init_species_threshold = 4
+        self.init_species_threshold = 6
         self.species_threshold_delta = .5
         self.species_stagnation_threshold = 20
-        self.species_selection_ratio = .2
+        self.species_selection_ratio = 1
         self.crossover_between_species_probability = .001
 
         """DGNA: the probability of adding a node is 0.5 and the
@@ -77,7 +77,8 @@ class   Config:
 
         # DGNA/SGMA uses 1 or 2 so that patterns in the initial
         # generation would be nontrivial (Stanley, 2007).
-        self.hidden_nodes_at_start = 2
+        # Original NEAT paper uses 0
+        self.hidden_nodes_at_start = 0
 
         self.allow_input_activation_mutation = False
 
@@ -96,7 +97,7 @@ class   Config:
             
         
     def apply_condition(self, key, value):
-        """Applies a condition to the configuration."""
+        """Applies an experimental condition to the configuration."""
         setattr(self, key, value)
         
     #################    

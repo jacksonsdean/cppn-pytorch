@@ -31,7 +31,7 @@ class NEAT():
         self.fitness_over_time = np.zeros(self.config.num_generations, dtype=np.float)
         self.solutions_over_time = []
         self.species_champs_over_time = []
-            
+        self.time_elapsed = 0
         self.solution_generation = -1
         self.species_threshold = self.config.init_species_threshold
         self.population = []
@@ -195,6 +195,8 @@ class NEAT():
             if(sp.population_count<=0): continue
             members = get_members_of_species(self.population, sp.id) # maintains sort order
             sp.population_count = len(members)
+            if self.debug_output:
+                print("Species", sp.id, "has", sp.population_count, "members")
             sp.current_champ = members[0] # still sorted from before
             if(self.config.within_species_elitism > 0  and sp.allowed_offspring > 0):
                 n_elites = min(sp.population_count, self.config.within_species_elitism, sp.allowed_offspring) 
@@ -206,6 +208,8 @@ class NEAT():
             if(len(members)>1):
                 new_members = []
                 fitness_selected = round((1-self.config.novelty_selection_ratio_within_species) * self.config.species_selection_ratio * len(members)) 
+                if self.debug_output:
+                    print("Fitness selected:", fitness_selected)
                 new_members = members[:fitness_selected] # truncation selection
                 if (self.config.novelty_selection_ratio_within_species >0):
                     novelty_members = sorted(members, key=lambda x: x.novelty, reverse=True) 
@@ -222,7 +226,7 @@ class NEAT():
                 parent1 = np.random.choice(members, size=max(len(members), 1))[0] # pick 1 random parent
                 #crossover
                 if(self.config.do_crossover and parent1):
-                    if(np.random.rand()<self.config.crossover_between_species_probability): # cross-species crossover (.001 in s/m07)
+                    if(torch.rand(1)[0]<self.config.crossover_between_species_probability): # cross-species crossover (.001 in s/m07)
                         other_id = -1
                         for sp2 in self.all_species:
                             if count_members_of_species(self.population, sp2.id) > 0 and sp2.id!=sp.id:
@@ -230,9 +234,10 @@ class NEAT():
                         if(other_id>-1): members = get_members_of_species(self.population, other_id)
                     parent2 = np.random.choice(members, size=max(len(members), 1))[0] # allow parents to crossover with themselves
                     if parent2:
+                        child = parent1.crossover(parent2)
                         # child = self.crossover(parent1, parent2)
-                        sorted_parents = sorted([parent1, parent2], key=lambda x: x.fitness, reverse=True)
-                        child = sorted_parents[0].crossover(sorted_parents[1])
+                        # sorted_parents = sorted([parent1, parent2], key=lambda x: x.fitness, reverse=True)
+                        # child = sorted_parents[0].crossover(sorted_parents[1])
                 else:
                     if parent1:
                         child = copy.deepcopy(parent1)    
@@ -245,6 +250,7 @@ class NEAT():
         return new_children
 
     def evolve(self, run_number = 1, show_output=True):
+        self.start_time = time.time()
         try:
             self.run_number = run_number
             self.show_output = show_output or self.debug_output
@@ -255,18 +261,21 @@ class NEAT():
                 assign_species(self.all_species, self.population, self.species_threshold, Species)
 
             # Run NEAT
-            pbar = trange(self.config.num_generations, desc="Generations")
+            pbar = trange(self.config.num_generations, desc=f"Run {self.run_number}")
             for self.gen in pbar:
                 self.run_one_generation()
                 pbar.set_postfix_str(f"f: {self.get_best().fitness:.4f} d:{self.diversity_over_time[self.gen-1]:.4f}")
         except KeyboardInterrupt:
-            raise KeyboardInterrupt()            
+            raise KeyboardInterrupt()  
+        self.end_time = time.time()     
+        self.time_elapsed = self.end_time - self.start_time     
 
     def run_one_generation(self):
        
-         # update all ids:
-        if self.gen > 0:
-            for ind in self.population:
+        # update all ids:
+        # if self.gen > 0:
+        for ind in self.population:
+            if ind.id is None:
                 ind.set_id(self.genome_type.get_id())
         #------------#
         # assessment # 
@@ -280,7 +289,7 @@ class NEAT():
         
         # update all ids:
         # for ind in self.population:
-            # ind.set_id(CPPN.get_id())
+        #     ind.set_id(CPPN.get_id())
             
         # if self.gen == 0:
             # self.show_best()

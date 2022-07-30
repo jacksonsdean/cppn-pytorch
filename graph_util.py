@@ -11,7 +11,7 @@ except ModuleNotFoundError:
     import cppn_neat.activation_functions as af
 
 
-def is_valid_connection(from_node, to_node, config):
+def is_valid_connection(nodes, key:tuple, config):
     """
     Checks if a connection is valid.
     params:
@@ -21,6 +21,9 @@ def is_valid_connection(from_node, to_node, config):
     returns:
         True if the connection is valid, False otherwise.
     """
+    from_node, to_node = key
+    from_node, to_node = nodes[from_node], nodes[to_node]
+    
     if from_node.layer == to_node.layer:
         return False  # don't allow two nodes on the same layer to connect
 
@@ -59,7 +62,7 @@ def get_disjoint_connections(this_cxs, other_innovation):
     if(len(this_cxs) == 0 or len(other_innovation) == 0):
         return []
     return [t_cx for t_cx in this_cxs if\
-        (t_cx.innovation not in other_innovation and t_cx.innovation < other_innovation[-1])]
+        (t_cx.key not in other_innovation and t_cx.key < other_innovation[-1])]
 
 
 def get_excess_connections(this_cxs, other_innovation):
@@ -68,30 +71,31 @@ def get_excess_connections(this_cxs, other_innovation):
     if(len(this_cxs) == 0 or len(other_innovation) == 0):
         return []
     return [t_cx for t_cx in this_cxs if\
-            (t_cx.innovation not in other_innovation and t_cx.innovation > other_innovation[-1])]
+            (t_cx.key not in other_innovation and t_cx.key > other_innovation[-1])]
 
 
 def get_matching_connections(cxs_1, cxs_2):
     """returns connections in cxs_1 that share an innovation number with a connection in cxs_2
        and     connections in cxs_2 that share an innovation number with a connection in cxs_1"""
-       
-    return sorted([c1 for c1 in cxs_1 if c1.innovation in [c2.innovation for c2 in cxs_2]],
-                    key=lambda x: x.innovation),\
-                    sorted([c2 for c2 in cxs_2 if c2.innovation in [c1.innovation for c1 in cxs_1]],
-                    key=lambda x: x.innovation)
+
+    return sorted([c1 for c1 in cxs_1 if c1.key in [c2.key for c2 in cxs_2]],
+                    key=lambda x: x.key),\
+                    sorted([c2 for c2 in cxs_2 if c2.key in [c1.key for c1 in cxs_1]],
+                    key=lambda x: x.key)
 
 
 def find_node_with_id(nodes, node_id):
     """Returns the node with the given id from the list of nodes"""
-    for node in nodes:
-        if node.id == node_id:
-            return node
-    return None
+    return nodes[node_id]
+    # for node in nodes:
+    #     if node.id == node_id:
+    #         return node
+    # return None
 
 def find_cx_with_innovation(cxs, innovation):
     """Returns the node with the given id from the list of nodes"""
     for cx in cxs:
-        if cx.innovation == innovation:
+        if cx.key == innovation:
             return cx
     return None
 
@@ -105,9 +109,9 @@ def get_ids_from_individual(individual):
     Returns:
         tuple: (inputs, outputs, connections) the ids of the CPPN's nodes
     """
-    inputs = [n.id for n in individual.input_nodes()]
-    outputs = [n.id for n in individual.output_nodes()]
-    connections = [(c.from_node.id, c.to_node.id)
+    inputs = list(individual.input_nodes().keys())
+    outputs = list(individual.output_nodes().keys())
+    connections = [c.key
                    for c in individual.enabled_connections()]
     return inputs, outputs, connections
 
@@ -120,8 +124,10 @@ def get_candidate_nodes(s, connections):
 
 def get_incoming_connections(individual, node):
     """Given an individual and a node, returns the connections in individual that end at the node"""
-    return list(filter(lambda x, n=node: x.to_node.id == n.id,
+    return list(filter(lambda x, n=node: x.key[1] == n.id,
                individual.enabled_connections()))  # cxs that end here
+
+
 
 
 # Functions below are modified from other packages
@@ -214,7 +220,6 @@ def feed_forward_layers(individual):
     """
 
     inputs, outputs, connections = get_ids_from_individual(individual)
-
     required = required_for_output(inputs, outputs, connections)
 
     layers = []
