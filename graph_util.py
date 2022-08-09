@@ -3,6 +3,7 @@ import inspect
 import random
 import sys
 from typing import Callable
+import torch
 
 import numpy as np
 try:
@@ -308,26 +309,23 @@ def hsv2rgb(hsv):
 
     Examples
     --------
-    >>> from skimage import data
     >>> img = data.astronaut()
     >>> img_hsv = rgb2hsv(img)
     >>> img_rgb = hsv2rgb(img_hsv)
     """
-    arr = hsv
-    hi = np.floor(arr[..., 0] * 6)
-    f = arr[..., 0] * 6 - hi
-    p = arr[..., 2] * (1 - arr[..., 1])
-    q = arr[..., 2] * (1 - f * arr[..., 1])
-    t = arr[..., 2] * (1 - (1 - f) * arr[..., 1])
-    v = arr[..., 2]
-
-    hi = np.stack([hi, hi, hi], axis=-1).astype(np.uint8) % 6
-    out = np.choose(
-        hi, np.stack([np.stack((v, t, p), axis=-1),
-                      np.stack((q, v, p), axis=-1),
-                      np.stack((p, v, t), axis=-1),
-                      np.stack((p, q, v), axis=-1),
-                      np.stack((t, p, v), axis=-1),
-                      np.stack((v, p, q), axis=-1)]))
-
-    return out
+    hsv_h, hsv_s, hsv_l = hsv[:, 0:1], hsv[:, 1:2], hsv[:, 2:3]
+    _c = hsv_l * hsv_s
+    _x = _c * (- torch.abs(hsv_h * 6. % 2. - 1) + 1.)
+    _m = hsv_l - _c
+    _o = torch.zeros_like(_c)
+    idx = (hsv_h * 6.).type(torch.uint8)
+    idx = (idx % 6).expand(-1, 3, -1, -1)
+    rgb = torch.empty_like(hsv)
+    rgb[idx == 0] = torch.cat([_c, _x, _o], dim=1)[idx == 0]
+    rgb[idx == 1] = torch.cat([_x, _c, _o], dim=1)[idx == 1]
+    rgb[idx == 2] = torch.cat([_o, _c, _x], dim=1)[idx == 2]
+    rgb[idx == 3] = torch.cat([_o, _x, _c], dim=1)[idx == 3]
+    rgb[idx == 4] = torch.cat([_x, _o, _c], dim=1)[idx == 4]
+    rgb[idx == 5] = torch.cat([_c, _o, _x], dim=1)[idx == 5]
+    rgb += _m
+    return rgb

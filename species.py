@@ -1,3 +1,4 @@
+import copy
 import math
 import random
 import numpy as np
@@ -10,23 +11,30 @@ class Species:
         self.avg_fitness = -math.inf
         self.allowed_offspring = 0
         self.population_count = 0
-        self.last_fitness= self.avg_adjusted_fitness
+        self.last_fitness =  self.avg_adjusted_fitness
         self.last_improvement = 0
         self.current_champ = None
     
     def update(self, global_adjusted_fitness, members, gen, stagnation_threshold, total_pop):
         self.avg_adjusted_fitness = torch.mean(torch.stack([i.adjusted_fitness for i in members]))
+        
+        # self.avg_adjusted_fitness = torch.mean(torch.stack([i.adjusted_fitness for i in members]))
         self.avg_fitness =  torch.mean(torch.stack([i.fitness for i in members]))
+        
+        
+        self.members= members
+        self.population_count = len(members)
+        
         if(self.avg_fitness > self.last_fitness):
             self.last_improvement = gen
-        self.last_fitness = self.avg_fitness
+            self.last_fitness = self.avg_fitness
 
         # Every species is assigned a potentially different number of offspring in proportion to the sum of ad-
         # justed fitnesses of its member organisms. Species then reproduce by first eliminating
         # the lowest performing members from the population. The entire population is then
         # replaced by the offspring of the remaining organisms in each species.
 
-        if(gen- self.last_improvement>= stagnation_threshold):
+        if(gen- self.last_improvement >= stagnation_threshold):
             self.allowed_offspring = 0
         else:
             try:
@@ -40,14 +48,14 @@ class Species:
 
 
 
-def get_adjusted_fitness_of_species(population, species):
-    return torch.mean(torch.stack([i.adjusted_fitness for i in population if i.species_id == species]))
-def get_fitness_of_species(population, species):
-    return torch.mean(torch.stack([i.fitness for i in population if i.species_id == species]))
-def count_members_of_species(population, species):
-    return len(get_members_of_species(population, species))
-def get_members_of_species(population, species):
-    return [ind for ind in population if ind.species_id == species]
+def get_adjusted_fitness_of_species(population, species_id:int):
+    return torch.mean(torch.stack([i.adjusted_fitness for i in population if i.species_id == species_id]))
+def get_fitness_of_species(population, species_id:int):
+    return torch.mean(torch.stack([i.fitness for i in population if i.species_id == species_id]))
+def count_members_of_species(population, species_id:int):
+    return len(get_members_of_species(population, species_id))
+def get_members_of_species(population, species_id:int):
+    return [ind for ind in population if ind.species_id == species_id]
 def count_number_of_species(population):
     species = []
     for ind in population:
@@ -65,41 +73,73 @@ def get_current_species_champs(population, all_species):
     return [sp.current_champ for sp in all_species if (sp.population_count>0 and sp.current_champ is not None)]
 
 
-def assign_species(all_species, population, threshold, SpeciesClass):
+def assign_species(all_species, parents, children, threshold, SpeciesClass):
     reps = {}
+    if len(all_species) == 0:
+        # first time through, create species 0
+        all_species.append(SpeciesClass(0))
+        np.random.choice(children, 1)[0].species_id = 0
+        
     for s in all_species:
-        species_pop = get_members_of_species(population, s.id)
-        s.population_count = len(species_pop)
+        s.members=  get_members_of_species(parents, s.id)
+        s.population_count = len(s.members)
         if(s.population_count<1): continue
-        reps[s.id] = np.random.choice(species_pop, 1)[0]
-        
+        reps[s.id] = np.random.choice(s.members, 1)[0]
+        # print(f"species {s.id} has {s.population_count} members and rep is {reps[s.id].id}")
     
-    # The Genome Loop:
-    for g in population:
-        # – Take next genome g from P
-        placed = False
-        species = list(range(len(all_species)))
-        random.shuffle(species)
+    # for r in reps:
+    #     print(f"species {r} has {reps[r].id} as representative")
         
+    # The Genome Loop:
+    for g in children:
+        g.species_id = None
+        # – Take next genome g from P
+        # if g in reps.values(): continue
+        placed = False
+
+        # print("individual {}".format(g.id))
         # – The Species Loop:
-        for s_index in species:
+        possible_reps = list(reps.keys())
+        random.shuffle(possible_reps)
+        for s_index in possible_reps:
+            # print(f"\tcheck species {s_index}")
             s = all_species[s_index]
+            if not s.id in reps.keys() or reps[s.id] is None:
+                raise Exception(f"species {s.id} has no representative")
+                continue
             # ·get next species s from S
-            species_pop = get_members_of_species(population, s.id)
-            s.population_count = len(species_pop)
+            s.members = get_members_of_species(parents, s.id)
+            # species_pop = s.members
+            s.population_count = len(s.members)
+
             if(s.population_count<1): continue
+            # print("\t gen diff:", g.genetic_difference(reps[s.id]), "thresh:", threshold, "same?", g.species_comparision(reps[s.id], threshold))
             if(g.species_comparision(reps[s.id], threshold)):
-            # if(g.species_comparision(species_pop[0], threshold)):
+                # print("\t\tindividual {} is similar to representative {} of species {}".format(g.id, reps[s.id].id, s.id) )
                 # ·If g is compatible with s, add g to s
                 g.species_id = s.id
                 placed = True
                 break
         if(not placed):
             # ∗If all species in S have been checked, create new species and place g in it
+            # print("no species for individual {}".format(g.id))
             new_id = len(all_species)
             all_species.append(SpeciesClass(new_id))
-            reps[new_id] = g
+            all_species[-1].population_count = 1
             g.species_id = new_id
+            reps[new_id] = g
+        assert g.species_id is not None, f"g.species_id is None: {g.id}"
+            # print(f"new species {new_id} created with rep", g.id)
+    # for s in all_species:
+        # print(f"species {s.id} has {s.population_count} members: {[i.id for i in get_members_of_species(population, s.id)]}")
+    
+    # TODO: slow
+    for sp in all_species:
+        sp.members = get_members_of_species(children, sp.id)
+        sp.population_count = len(sp.members)
+        # print("species {}, members: {}, pop: {}".format(sp.id, len(sp.members), sp.population_count))
+    
+    return count_number_of_species(children)
 
 def normalize_species_offspring(all_species, c):
     # Normalize the number of allowed offspring per species so that the total is close to population_size

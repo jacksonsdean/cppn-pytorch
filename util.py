@@ -1,3 +1,4 @@
+import copy
 import math
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,7 +22,7 @@ warnings.filterwarnings("ignore") # for bootstrap CI
 #     fns.extend([("avg_pixel_distance_fitness", avg_pixel_distance_fitness)])
 #     return fns[[f[0] for f in fns].index(name)][1]
     
-def visualize_network(individual, sample_point=None, color_mode="L", visualize_disabled=False, layout='multi', sample=False, show_weights=False, use_inp_bias=False, use_radial_distance=True, save_name=None, extra_text=None, curved=False):
+def visualize_network(individual, sample_point=None, color_mode="L", visualize_disabled=False, layout='multi', sample=False, show_weights=False, use_inp_bias=False, use_radial_distance=True, save_name=None, extra_text=None, curved=False, return_fig=False):
     c = individual.config
     if(sample):
         if sample_point is None:
@@ -138,9 +139,14 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
         nx.draw_networkx_edge_labels(G, pos, edge_labels, label_pos=.75)
     nx.draw_networkx_labels(G, pos, labels=node_labels)
     plt.tight_layout()
-    if save_name is not None:
-        plt.savefig(save_name, format="PNG")
+    if return_fig:
+        return plt.gcf()
+        # fig_copy = copy.deepcopy(plt.gcf())
         # plt.close()
+        
+        return fig_copy
+    elif save_name is not None:
+        plt.savefig(save_name, format="PNG")
     else:
         plt.show()
         # plt.close()
@@ -264,6 +270,28 @@ def visualize_hn_phenotype_network(individual, visualize_disabled=False, layout=
         # plt.close()
     ""
     # labels = nx.get_edge_attributes(G,'weight')
+
+def print_net(individual, show_weights=False, visualize_disabled=False):
+    print(f"<CPPN {individual.id}")
+    print(f"nodes:")
+    for k, v in individual.node_genome.items():
+        print("\t",k, "\t|\t",v.layer, "\t|\t",v.activation.__name__)
+    print(f"connections:")
+    for k, v in individual.connection_genome.items():
+        print("\t",k, "\t|\t",v.enabled, "\t|\t",v.weight)
+    print(">")
+  
+def get_network_images(networks):
+    imgs = []
+    for net in networks:
+        fig = visualize_network(net, return_fig=True)
+        ax = fig.gca()
+        ax.margins(0)
+        fig.canvas.draw()
+        image_from_plot = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+        img = image_from_plot.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        imgs.append(img)  
+    return imgs
 
 def get_best_solution_from_all_runs(results):
     best_fit = -math.inf

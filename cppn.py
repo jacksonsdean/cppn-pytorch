@@ -7,6 +7,8 @@ import json
 from typing import Callable
 # import numpy as np
 import torch
+
+from cppn_neat.util import visualize_network
 try:
     from activation_functions import identity
     from graph_util import name_to_fn, choose_random_function, is_valid_connection
@@ -269,7 +271,7 @@ class CPPN():
         self.connection_genome = {}
         self.selected = False
         self.species_id = 0
-        self.id = None
+        self.id = CPPN.get_id()
         
         torch.manual_seed(config.seed)
 
@@ -316,16 +318,16 @@ class CPPN():
         """Initializes the node genome."""
         total_node_count = self.n_inputs + \
             self.n_outputs + self.config.hidden_nodes_at_start
-        for _ in range(self.n_inputs):
-            new_node = Node(self.get_new_node_id(), identity, NodeType.INPUT, 0)
+        for idx in range(self.n_inputs):
+            new_node = Node(-(1+idx), identity, NodeType.INPUT, 0)
             self.node_genome[new_node.key] = new_node
             
-        for _ in range(self.n_inputs, self.n_inputs + self.n_outputs):
+        for idx in range(self.n_inputs, self.n_inputs + self.n_outputs):
             if self.config.output_activation is None:
                 output_fn = choose_random_function(self.config)
             else:
                 output_fn = self.config.output_activation
-            new_node = Node(self.get_new_node_id(), output_fn, NodeType.OUTPUT, 2)
+            new_node = Node(-(1+idx), output_fn, NodeType.OUTPUT, 2)
             self.node_genome[new_node.key] = new_node
             
         for _ in range(self.n_inputs + self.n_outputs, total_node_count):
@@ -494,6 +496,7 @@ class CPPN():
 
     def disable_invalid_connections(self):
         """Disables connections that are not compatible with the current configuration."""
+        return # TODO?
         for key, connection in self.connection_genome.items():
             if connection.enabled:
                 if not is_valid_connection(self.node_genome, connection.key, self.config):
@@ -808,6 +811,7 @@ class CPPN():
         self.image *= 255
         if image_range != 0: # prevent divide by 0
             self.image /= image_range
+        
         self.image = self.image.to(dtype=torch.uint8)
 
     def genetic_difference(self, other) -> float:
@@ -863,7 +867,7 @@ class CPPN():
 
     def species_comparision(self, other, threshold) -> bool:
         # returns whether other is the same species as self
-        return self.genetic_difference(other) <= threshold  # TODO equal to?
+        return self.genetic_difference(other) < threshold
 
     def update_with_fitness(self, fit, num_in_species):
         self.fitness = fit
@@ -880,37 +884,42 @@ class CPPN():
 
     def crossover(self, other):
         """ Configure a new genome by crossover from two parent genomes. """
-        child = CPPN(self.config, {}, {})
-        genome1, genome2 = self, other
+        child = CPPN(self.config, {}, {}) # create an empty child genome
         
-        if genome1.fitness > genome2.fitness:
-            parent1, parent2 = genome1, genome2
+        # determine which parent is more fit
+        if self.fitness and other.fitness:        
+            if self.fitness > other.fitness:
+                parent1, parent2 = self, other
+            else:
+                parent1, parent2 = other, self
         else:
-            parent1, parent2 = genome2, genome1
+            # fitness undefined, choose randomly
+            if torch.rand() > 0.5:
+                parent1, parent2 = self, other
+            else:
+                parent1, parent2 = other, self
 
         # Inherit connection genes
-        for key, cg1 in parent1.connection_genome.items():
-            cg2 = parent2.connection_genome.get(key)
-            if cg2 is None:
+        for key, cx1 in parent1.connection_genome.items():
+            cx2 = parent2.connection_genome.get(key)
+            if cx2 is None:
                 # Excess or disjoint gene: copy from the fittest parent.
-                child.connection_genome[key] = cg1.copy()
+                child.connection_genome[key] = cx1.copy()
             else:
                 # Homologous gene: combine genes from both parents.
-                child.connection_genome[key] = cg1.crossover(cg2)
+                child.connection_genome[key] = cx1.crossover(cx2)
 
         # Inherit node genes
-        parent1_set = parent1.node_genome
-        parent2_set = parent2.node_genome
-
-        for key, ng1 in parent1_set.items():
-            ng2 = parent2_set.get(key)
+        for key, node1 in parent1.node_genome.items():
+            node2 = parent2.node_genome.get(key)
             assert key not in child.node_genome
-            if ng2 is None:
+            if node2 is None:
                 # Extra gene: copy from the fittest parent
-                child.node_genome[key] = ng1.copy()
+                child.node_genome[key] = node1.copy()
             else:
                 # Homologous gene: combine genes from both parents.
-                child.node_genome[key] = ng1.crossover(ng2)
+                child.node_genome[key] = node1.crossover(node2)
+
         child.update_node_layers()
         return child
 

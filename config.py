@@ -1,6 +1,7 @@
 """Stores configuration parameters for the CPPN."""
 import json
 import random
+from typing import Callable
 
 import torch
 
@@ -24,16 +25,18 @@ class   Config:
         self.num_generations = 1000
         self.species_target = 3
         self.population_elitism = 1
-        self.within_species_elitism = 0 # can converge too quickly
+        self.within_species_elitism = 0 # can converge too quickly on small populations
         self.res_w = 28
         self.res_h = 28
         self.save_w = 512
         self.save_h = 512
         self.color_mode = "RGB"
         self.do_crossover = True
-        self.use_dynamic_mutation_rates = False
+        self.crossover_ratio = .75 # from original NEAT
+        self.use_dynamic_mutation_rates = True
+        self.dynamic_mutation_rate_end_modifier = 0.1
         self.allow_recurrent = False
-        self.init_connection_probability = .85
+        self.init_connection_probability = .25
         self.activations = get_all()
         self.seed = random.randint(0, 100000)
         self.device = "cpu"
@@ -41,33 +44,35 @@ class   Config:
         self.novelty_selection_ratio_within_species = 0
         self.novelty_adjusted_fitness_proportion = 0
         
-        self.fitness_function = lambda x, y: -((x-y)**2).mean() # default -mse
-        self.min_fitness = self.fitness_function(torch.Tensor([255]*30*32), torch.Tensor([0]*30*32)).cpu().item()
-        self.max_fitness = 0
+        self.fitness_function = 'mse' # default -mse
+        self.min_fitness = -torch.inf
+        self.max_fitness = torch.inf
         
         # NEAT specific parameters
         self.use_speciation = True
         self.init_species_threshold = 6
-        self.species_threshold_delta = .5
-        self.species_stagnation_threshold = 20
-        self.species_selection_ratio = 1
-        self.crossover_between_species_probability = .001
+        self.species_threshold_delta = 1
+        self.species_stagnation_threshold = 100
+        self.species_selection_ratio = 1.0 # truncation selection within species
+        self.crossover_between_species_probability = 0.001 # .001 in the original NEAT
 
         """DGNA: the probability of adding a node is 0.5 and the
         probability of adding a connection is 0.4.
         SGNA: probability of adding a node is 0.05 and the
-         probability of adding a connection is 0.04."""
-        self.prob_mutate_activation = .1
-        self.prob_mutate_weight = .15
-        self.prob_add_connection = .1
-        self.prob_add_node = .1
-        self.prob_remove_node = 0.05
-        self.prob_disable_connection = .05
+         probability of adding a connection is 0.04.
+        NEAT: probability of adding a node is 0.03 and the
+          probability of adding a connection is 0.05."""
+        self.prob_mutate_activation = .15
+        self.prob_mutate_weight = .80 # .80 in the original NEAT
+        self.prob_add_connection = .3 # 0.05 in the original NEAT
+        self.prob_add_node = .8 # 0.03 in original NEAT
+        self.prob_remove_node = 0.015
+        self.prob_disable_connection = .015
 
         self.max_weight = 3.0
         self.weight_threshold = 0
         self.prob_random_restart =.001
-        self.prob_weight_reinit = 0.0
+        self.prob_weight_reinit = 0.1 * .80 # .1 in the original NEAT (.1 of .8)
         self.prob_reenable_connection = 0.1
         self.weight_mutation_max = 2
         
@@ -80,7 +85,7 @@ class   Config:
         # Original NEAT paper uses 0
         self.hidden_nodes_at_start = 0
 
-        self.allow_input_activation_mutation = False
+        self.allow_input_activation_mutation = True
 
         self.animate = False
 
@@ -113,7 +118,9 @@ class   Config:
     def fns_to_strings(self):
         """Converts the activation functions to strings."""
         self.activations= [fn.__name__ if not isinstance(fn, str) else fn for fn in self.activations]
-        self.fitness_function = self.fitness_function.__name__
+        if isinstance(self.fitness_function, Callable):
+            self.fitness_function = self.fitness_function.__name__
+        
         if self.output_activation is None:
             self.output_activation = ""
         else:
