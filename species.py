@@ -50,12 +50,12 @@ class Species:
                 else:
                     
                     # proportion = self.sum_adj_fitness / global_adjusted_fitness
-                    proportion = (self.sum_adj_fitness -min_adj_fitness) / fit_range
+                    proportion = (self.sum_adj_fitness - min_adj_fitness) / fit_range
                     
                     # print("global_adjusted_fitness: ", global_adjusted_fitness, "self.sum_adj_fitness: ", self.sum_adj_fitness, "proportion: ", proportion)
                     self.allowed_offspring = int(torch.round(total_pop * (proportion)))
                     
-                    # print(self.id, global_adjusted_fitness, self.sum_adj_fitness, proportion, self.allowed_offspring)
+                    # print(self.id, global_adjusted_fitness, self.sum_adj_fitness, min_adj_fitness, max_adjusted_fitness, fit_range, proportion, self.allowed_offspring)
                     # self.allowed_offspring = int(torch.round(self.population_count * (self.sum_adj_fitness / global_adjusted_fitness)))
                     # self.allowed_offspring = int(torch.round(self.population_count * (self.sum_adj_fitness / global_adjusted_fitness)))
                 if self.allowed_offspring < 0: self.allowed_offspring = 0

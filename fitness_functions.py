@@ -10,7 +10,7 @@ from torchvision.transforms import Resize
 # NEAT calculates number offspring per species 
 
 def mse(candidate, target):
-   return 255.0**2-((target-candidate)**2).mean()
+   return (255.0**2-((target-candidate)**2).mean()) / 255.0**2
 
 def test(candidate, target):
    return (candidate/255).mean() # should get all white

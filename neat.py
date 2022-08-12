@@ -144,8 +144,8 @@ class NEAT():
         fs = torch.stack([sp.sum_adj_fitness for sp in self.all_species if sp.population_count > 0])
         global_adj_fitness = torch.sum(fs)
 
-        min_adj_fitness = torch.min(torch.stack([sp.sum_adj_fitness for sp in self.all_species]))
-        max_adj_fitness = torch.max(torch.stack([sp.sum_adj_fitness for sp in self.all_species]))
+        min_adj_fitness = torch.min(torch.stack([sp.sum_adj_fitness for sp in self.all_species if sp.population_count > 0]))
+        max_adj_fitness = torch.max(torch.stack([sp.sum_adj_fitness for sp in self.all_species if sp.population_count > 0]))
 
 
         # update species, calculate allowed offspring

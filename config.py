@@ -24,8 +24,8 @@ class   Config:
         self.population_size = 10
         self.num_generations = 1000
         self.species_target = 3
-        self.population_elitism = 0
-        self.within_species_elitism = 0 #TODO NOT SURE IF WORKS can converge too quickly on small populations
+        self.population_elitism = 1
+        self.within_species_elitism = 1 #TODO NOT SURE IF WORKS can converge too quickly on small populations
         self.res_w = 28
         self.res_h = 28
         self.save_w = 512
@@ -36,7 +36,7 @@ class   Config:
         self.use_dynamic_mutation_rates = True
         self.dynamic_mutation_rate_end_modifier = 0.1
         self.allow_recurrent = False
-        self.init_connection_probability = 1.0
+        self.init_connection_probability = 0.85
         self.activations = get_all()
         self.seed = random.randint(0, 100000)
         self.device = "cpu"
@@ -45,16 +45,16 @@ class   Config:
         self.novelty_adjusted_fitness_proportion = 0
         
         # self.fitness_function = 'test' # should get all white pixels
-        self.fitness_function = 'xor' # for debugging
-        # self.fitness_function = 'mse' # default -mse
+        # self.fitness_function = 'xor' # for debugging
+        self.fitness_function = 'mse' # default -mse
         # self.fitness_function = 'haarpsi' # perceptual similarity
         self.min_fitness = 0
         self.max_fitness = torch.inf
         
         # NEAT specific parameters
         self.use_speciation = True
-        self.init_species_threshold = 0.1
-        self.species_threshold_delta = .050
+        self.init_species_threshold = 5
+        self.species_threshold_delta = 1
         self.species_stagnation_threshold = 15
         self.species_selection_ratio = 1.0 # truncation selection within species
         self.crossover_between_species_probability = 0.001 # .001 in the original NEAT
@@ -68,7 +68,7 @@ class   Config:
         self.prob_mutate_activation = .15
         self.prob_mutate_weight = .80 # .80 in the original NEAT
         self.prob_add_connection = .05 # 0.05 in the original NEAT
-        self.prob_add_node = .03 # 0.03 in original NEAT
+        self.prob_add_node = .8 # 0.03 in original NEAT
         self.prob_remove_node = 0.015
         self.prob_disable_connection = .015
 
@@ -93,8 +93,8 @@ class   Config:
         self.animate = False
 
         # https://link.springer.com/content/pdf/10.1007/s10710-007-9028-8.pdf page 148
-        # self.use_input_bias = True # SNGA,
-        self.use_input_bias = False # SNGA,
+        self.use_input_bias = True # SNGA,
+        # self.use_input_bias = False # SNGA,
         # self.use_radial_distance = True # bias towards radial symmetry
         self.use_radial_distance = False # bias towards radial symmetry
         
