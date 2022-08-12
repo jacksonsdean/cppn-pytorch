@@ -48,9 +48,13 @@ class NEAT():
         
         if not isinstance(config.fitness_function, Callable):
               self.fitness_function = name_to_fn(config.fitness_function)
-         # normalize fitness function
-        self.fitness_function_normed = lambda x,y: (self.config.fitness_function(x,y) - self.config.min_fitness) / (self.config.max_fitness - self.config.min_fitness)
-              
+        
+        # normalize fitness function
+        if self.config.min_fitness is not None and self.config.max_fitness is not None:
+            self.fitness_function_normed = lambda x,y: (self.config.fitness_function(x,y) - self.config.min_fitness) / (self.config.max_fitness - self.config.min_fitness)
+        else:
+            self.fitness_function_normed = self.fitness_function # no normalization
+                
         self.target = target
     
     
@@ -91,11 +95,11 @@ class NEAT():
         for i in pbar:
             if self.show_output:
                 pbar.set_description_str("Evaluating gen " + str(self.gen) + ": ")
-                
-            # self.population[i].start_simulation(True, self.debug_output) # TODO
             
-            # self.population[i].fitness = self.fitness_function(self.population[i].get_image(), self.target)
-            self.population[i].fitness = self.fitness_function_normed(self.population[i].get_image(), self.target)
+            if self.fitness_function.__name__ == "xor":
+                self.population[i].fitness = self.fitness_function(self.population[i])
+            else:
+                self.population[i].fitness = self.fitness_function_normed(self.population[i].get_image(), self.target)
             
         if self.show_output:
             pbar = trange(len(self.population))
@@ -124,18 +128,42 @@ class NEAT():
                 adj_novelty =  self.population[i].novelty / global_novelty
                 prop = self.config.novelty_adjusted_fitness_proportion
                 self.population[i].adjusted_fitness = (1-prop) * adj_fit  + prop * adj_novelty 
-        
-        
+        self.update_num_species_offspring()
+    
+    def update_num_species_offspring(self):
         for sp in self.all_species:
-            sp.avg_fitness = torch.mean(torch.stack([i.fitness for i in get_members_of_species(self.population, sp.id)])) if count_members_of_species(self.population, sp.id)>0 else -1000000
-            sp.avg_adj_fitness = torch.mean(torch.stack([i.adjusted_fitness for i in get_members_of_species(self.population, sp.id)])) if count_members_of_species(self.population, sp.id)>0 else -1000000
-        global_average_fitness = torch.mean(torch.stack([i.adjusted_fitness for i in self.population]))
+            sp.members = get_members_of_species(self.population, sp.id)
+            sp.population_count = len(sp.members)
+            if(sp.population_count <= 0): continue
+            sp.avg_fitness = torch.mean(torch.stack([i.fitness for i in sp.members])).item()
+            sp.sum_adj_fitness = torch.sum(torch.stack([i.adjusted_fitness for i in sp.members]))
+        
+        # print([sp.sum_adj_fitness for sp in self.all_species])
+        # global_adj_fitness = torch.sum(torch.stack([i.adjusted_fitness for i in self.population]))
+        # global_adj_fitness = torch.mean(torch.stack([i.adjusted_fitness for i in self.population]))
+        fs = torch.stack([sp.sum_adj_fitness for sp in self.all_species if sp.population_count > 0])
+        global_adj_fitness = torch.sum(fs)
 
+        min_adj_fitness = torch.min(torch.stack([sp.sum_adj_fitness for sp in self.all_species]))
+        max_adj_fitness = torch.max(torch.stack([sp.sum_adj_fitness for sp in self.all_species]))
+
+
+        # update species, calculate allowed offspring
         for sp in self.all_species:
-            sp.population_count = count_members_of_species(self.population, sp.id) 
             if(sp.population_count<=0): sp.allowed_offspring = 0; continue
-            members = get_members_of_species(self.population, sp.id)
-            sp.update(global_average_fitness, members, self.gen, self.config.species_stagnation_threshold, self.config.population_size)
+            sp.update(global_adj_fitness, sp.members, self.gen, self.config.species_stagnation_threshold, self.config.population_size, min_adj_fitness, max_adj_fitness)
+
+        normalize_species_offspring(self.all_species, self.config)
+
+
+        total_allowed_offspring = 0
+        for sp in self.all_species:
+            total_allowed_offspring += sp.allowed_offspring
+        if total_allowed_offspring == 0:
+            # total extinction
+            # TODO
+            sorted_species = sorted(self.all_species, key=lambda x: x.avg_fitness, reverse=True)
+            sorted_species[0].allowed_offspring = self.config.population_size
 
     def show_fitness_curve(self):
         # plt.close()
@@ -176,21 +204,20 @@ class NEAT():
         print(f" |  Best species (avg. fitness): {sorted(self.all_species, key=lambda x: x.avg_fitness if x.population_count > 0 else -1000000000, reverse=True)[0].id}")
         for species in self.all_species:
             if species.population_count > 0:
-                print(f" |    Species {species.id:03d} |> fit: {species.avg_fitness:.4f} | adj: {species.avg_adjusted_fitness:.4f} | stag: {self.gen-species.last_improvement} | pop: {species.population_count} | offspring: {species.allowed_offspring if species.allowed_offspring > 0 else 'X'}")
+                print(f" |    Species {species.id:03d} |> fit: {species.avg_fitness:.4f} | adj: {species.sum_adj_fitness:.4f} | stag: {self.gen-species.last_improvement} | pop: {species.population_count} | offspring: {species.allowed_offspring if species.allowed_offspring > 0 else 'X'}")
 
         print(f" Gen "+ str(self.gen), f"fitness: {self.get_best().fitness:.4f}")
         print()
 
     def neat_selection_and_reproduction(self):
         new_children = []
-        global_average_fitness = torch.mean(torch.stack([i.adjusted_fitness for i in self.population]))
-        for sp in self.all_species:
-            sp.members = get_members_of_species(self.population, sp.id)
-            sp.population_count = len(sp.members)
-            if(sp.population_count<=0): sp.allowed_offspring = 0; continue
-            sp.update(global_average_fitness, sp.members, self.gen, self.config.species_stagnation_threshold, self.config.population_size)
-
-        normalize_species_offspring(self.all_species, self.config)
+        # global_adj_fitness = torch.sum(torch.stack([i.adjusted_fitness for i in self.population]))
+        # for sp in self.all_species:
+        #     sp.members = get_members_of_species(self.population, sp.id)
+        #     sp.population_count = len(sp.members)
+        #     if(sp.population_count<=0): sp.allowed_offspring = 0; continue
+        #     sp.update(global_adj_fitness, sp.members, self.gen, self.config.species_stagnation_threshold, self.config.population_size)
+        # self.update_num_species_offspring()
         for sp in self.all_species:
             if(sp.population_count<=0): continue
             sp.current_champ = sp.members[0] # still sorted from before
@@ -198,7 +225,7 @@ class NEAT():
                 n_elites = min(sp.population_count, self.config.within_species_elitism, sp.allowed_offspring) 
                 for i in range(n_elites):
                     # Elitism: add the elite and make one less offspring
-                    new_child = copy.deepcopy(members[i])
+                    new_child = copy.deepcopy(sp.members[i])
                     new_child.id = self.genome_type.get_id()
                     new_children.append(new_child)
                     sp.allowed_offspring-=1
@@ -295,6 +322,9 @@ class NEAT():
             new_children.extend(self.neat_selection_and_reproduction()) # make children within species
             self.num_species = assign_species(self.all_species, self.population, new_children, self.species_threshold, Species) # assign new species ids
             self.population = new_children # replace parents with new children (mu, lambda)
+            for c in self.population:
+                assert c.species_id is not None
+                
             # for sp in self.all_species:
                 # print("Species", sp.id, "has", sp.population_count, "members")
             
@@ -342,15 +372,16 @@ class NEAT():
             
             # TODO testing:
             # automatically determine delta
-            delta = avg_distance - self.diversity_over_time[self.gen-1]
-            delta *= 1.5
-            delta = abs(delta)
-            delta = max(self.config.species_threshold_delta, delta)
+            # delta = avg_distance - self.diversity_over_time[self.gen-1]
+            # delta *= 1.5
+            # delta = abs(delta)
+            # delta = max(self.config.species_threshold_delta, delta)
             ###############################
             
             if(self.num_species>self.config.species_target): self.species_threshold+=delta
             if(self.num_species<self.config.species_target): self.species_threshold-=delta
-            self.species_threshold = max(0, self.species_threshold)
+            self.species_threshold = max(0.010, self.species_threshold)
+            # self.species_threshold = max(0.10, self.species_threshold)
         
         
         self.species_over_time[self.gen:] = self.num_species
@@ -366,7 +397,7 @@ class NEAT():
     
     def mutate(self, child):
         rates = self.get_mutation_rates()
-        child.fitness, child.adjusted_fitness = -math.inf, -math.inf # new fitnesses after mutation
+        child.fitness, child.adjusted_fitness = 0, 0 # new fitnesses after mutation
         child.mutate(rates)
     
     def get_best(self):
@@ -382,12 +413,12 @@ class NEAT():
         self.print_best()
         self.save_best_network_image()
         img = self.get_best().get_image().cpu().to(np.uint8).numpy()
-        plt.imshow(img)
+        plt.imshow(img, cmap='gray')
         plt.show()
         
     def save_best_img(self,fname):
         img = self.get_best().get_image().cpu().numpy()
-        plt.imsave(fname, img)
+        plt.imsave(fname, img, cmap='gray')
 
     def save_best_network_image(self):
         best = self.get_best()

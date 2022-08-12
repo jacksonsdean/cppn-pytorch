@@ -1,25 +1,27 @@
 import copy
 import math
 import random
+import traceback
 import numpy as np
 import torch
 
 class Species:
     def __init__(self, _id) -> None:
         self.id = _id
-        self.avg_adjusted_fitness = -math.inf
-        self.avg_fitness = -math.inf
+        self.sum_adj_fitness = torch.tensor(0.0, dtype=torch.float32)
+        self.avg_fitness = torch.tensor(0.0, dtype=torch.float32)
         self.allowed_offspring = 0
         self.population_count = 0
-        self.last_fitness =  self.avg_adjusted_fitness
+        self.last_fitness =  self.sum_adj_fitness
         self.last_improvement = 0
         self.current_champ = None
     
-    def update(self, global_adjusted_fitness, members, gen, stagnation_threshold, total_pop):
-        self.avg_adjusted_fitness = torch.mean(torch.stack([i.adjusted_fitness for i in members]))
+    def update(self, global_adjusted_fitness, members, gen, stagnation_threshold, total_pop, min_adj_fitness, max_adjusted_fitness):
+        self.sum_adj_fitness = torch.sum(torch.stack([i.adjusted_fitness for i in members]))
+        # self.mean_adj_fitness = torch.mean(torch.stack([i.adjusted_fitness for i in members]))
         
-        # self.avg_adjusted_fitness = torch.mean(torch.stack([i.adjusted_fitness for i in members]))
-        self.avg_fitness =  torch.mean(torch.stack([i.fitness for i in members]))
+        # self.sum_adj_fitness = torch.mean(torch.stack([i.adjusted_fitness for i in members]))
+        # self.avg_fitness =  torch.mean(torch.stack([i.fitness for i in members]))
         
         
         self.members= members
@@ -34,18 +36,35 @@ class Species:
         # the lowest performing members from the population. The entire population is then
         # replaced by the offspring of the remaining organisms in each species.
 
-        if(gen- self.last_improvement >= stagnation_threshold):
+        if(gen - self.last_improvement >= stagnation_threshold):
+            # stagnation
             self.allowed_offspring = 0
+            for member in members:
+                member.species_id = None
         else:
             try:
                 # nk = (Fk/Ftot)*P 
-                self.allowed_offspring = int(torch.round(self.population_count * (self.avg_adjusted_fitness / global_adjusted_fitness)))
+                fit_range = max_adjusted_fitness - min_adj_fitness
+                if fit_range == 0:
+                    self.allowed_offspring = self.population_count # TODO
+                else:
+                    
+                    # proportion = self.sum_adj_fitness / global_adjusted_fitness
+                    proportion = (self.sum_adj_fitness -min_adj_fitness) / fit_range
+                    
+                    # print("global_adjusted_fitness: ", global_adjusted_fitness, "self.sum_adj_fitness: ", self.sum_adj_fitness, "proportion: ", proportion)
+                    self.allowed_offspring = int(torch.round(total_pop * (proportion)))
+                    
+                    # print(self.id, global_adjusted_fitness, self.sum_adj_fitness, proportion, self.allowed_offspring)
+                    # self.allowed_offspring = int(torch.round(self.population_count * (self.sum_adj_fitness / global_adjusted_fitness)))
+                    # self.allowed_offspring = int(torch.round(self.population_count * (self.sum_adj_fitness / global_adjusted_fitness)))
                 if self.allowed_offspring < 0: self.allowed_offspring = 0
             except ArithmeticError:
-                print(f"error while calc allowed_offspring: pop:{self.population_count} fit:{self.avg_adjusted_fitness} glob: {global_adjusted_fitness}")
+                print(f"error while calc allowed_offspring: pop:{self.population_count} fit:{self.sum_adj_fitness} glob: {global_adjusted_fitness}")
+                traceback.print_exc()
             except ValueError:
-                print(f"error while calc allowed_offspring: pop:{self.population_count} fit:{self.avg_adjusted_fitness} glob: {global_adjusted_fitness}")
-
+                print(f"error while calc allowed_offspring: pop:{self.population_count} fit:{self.sum_adj_fitness} glob: {global_adjusted_fitness}")
+                traceback.print_exc()
 
 
 def get_adjusted_fitness_of_species(population, species_id:int):
@@ -81,7 +100,7 @@ def assign_species(all_species, parents, children, threshold, SpeciesClass):
         np.random.choice(children, 1)[0].species_id = 0
         
     for s in all_species:
-        s.members=  get_members_of_species(parents, s.id)
+        s.members = get_members_of_species(parents, s.id)
         s.population_count = len(s.members)
         if(s.population_count<1): continue
         reps[s.id] = np.random.choice(s.members, 1)[0]
@@ -92,16 +111,23 @@ def assign_species(all_species, parents, children, threshold, SpeciesClass):
         
     # The Genome Loop:
     for g in children:
-        g.species_id = None
         # – Take next genome g from P
-        # if g in reps.values(): continue
         placed = False
 
         # print("individual {}".format(g.id))
-        # – The Species Loop:
         possible_reps = list(reps.keys())
-        random.shuffle(possible_reps)
+        if(g.species_id  in reps.keys() and g.species_comparision(reps[g.species_id], threshold)):
+            # check if g is similar to it's parents species representative
+            g.species_id = s.id
+            placed = True
+            
+        else:
+            g.species_id = None #find a new home
+            
+        # random.shuffle(possible_reps)
+        # – The Species Loop:
         for s_index in possible_reps:
+            if placed: break
             # print(f"\tcheck species {s_index}")
             s = all_species[s_index]
             if not s.id in reps.keys() or reps[s.id] is None:
@@ -166,7 +192,7 @@ def normalize_species_offspring_exact(all_species, population_size):
     # if there are too many, takes away from worst (multiple) species
     total_offspring = torch.sum(torch.stack([s.allowed_offspring for s in all_species]))
     adj = 1 if total_offspring<population_size else -1
-    sorted_species = sorted(all_species, key=lambda x: x.avg_adjusted_fitness, reverse=(total_offspring<population_size))
+    sorted_species = sorted(all_species, key=lambda x: x.sum_adj_fitness, reverse=(total_offspring<population_size))
     while(total_offspring!=population_size):
         for s in sorted_species:
             if(s.population_count == 0 or s.allowed_offspring == 0): continue

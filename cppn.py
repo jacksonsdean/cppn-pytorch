@@ -112,6 +112,8 @@ class Node(Gene):
             if nodes[cx.key[0]] is not None:
                 inputs = nodes[cx.key[0]].outputs * cx.weight
                 self.sum_inputs = self.sum_inputs + inputs
+        if not isinstance(self.sum_inputs, torch.Tensor):
+            self.sum_inputs = torch.tensor([self.sum_inputs])
         
         self.outputs = self.activation(self.sum_inputs)  # apply activation
 
@@ -467,7 +469,7 @@ class CPPN():
 
     def mutate(self, rates=None):
         """Mutates the CPPN based on its config or the optionally provided rates."""
-        self.fitness, self.adjusted_fitness = -torch.inf, -torch.inf # new fitnesses after mutation
+        self.fitness, self.adjusted_fitness = 0, 0 # new fitnesses after mutation
         
         if rates is None:
             add_node = self.config.prob_add_node
@@ -637,11 +639,10 @@ class CPPN():
             inputs.append(math.sqrt(inputs[0]**2 + inputs[1]**2))
         if self.config.use_input_bias:
             inputs.append(1.0)  # bias = 1.0
-
         for inp, node in zip(inputs, self.input_nodes().values()):
             # inputs are first N nodes
-            node.sum_input = inp
-            node.output = node.activation(inp)
+            node.sum_inputs = inp
+            node.outputs = node.activation(inp)
 
     def get_layer(self, layer_index) -> list:
         """Returns a list of nodes in the given layer."""
@@ -669,12 +670,17 @@ class CPPN():
             cx.weight = torch.clamp(cx.weight, -self.config.max_weight, self.config.max_weight)
             
 
-    def reset_activations(self):
+    def reset_activations(self, parallel=True):
         """Resets all node activations to zero."""
-        for _, node in self.node_genome.items():
-            node.sum_inputs = torch.ones((self.config.res_h, self.config.res_w), device=self.device)/2.0
-            node.outputs = torch.ones((self.config.res_h, self.config.res_w), device=self.device)/2.0
-
+        if parallel:
+            for _, node in self.node_genome.items():
+                node.sum_inputs = torch.ones((self.config.res_h, self.config.res_w), device=self.device)/2.0
+                node.outputs = torch.ones((self.config.res_h, self.config.res_w), device=self.device)/2.0
+        else:
+            for _, node in self.node_genome.items():
+                node.sum_inputs = torch.zeros(1, device=self.device)
+                node.outputs = torch.zeros(1, device=self.device)
+            
     def eval(self, inputs):
         """Evaluates the CPPN."""
         self.set_inputs(inputs)
@@ -682,24 +688,29 @@ class CPPN():
 
     def feed_forward(self):
         """Feeds forward the network."""
-        if self.config.allow_recurrent:
-            for _, input_node in self.input_nodes().items():
-                # input nodes (handle recurrent)
-                input_node.activate(get_incoming_connections(self, input_node), self.node_genome)
+        layers = feed_forward_layers(self) # get layers
+        layers.insert(0, self.input_nodes().keys()) # add input nodes as first layer
+        for layer in layers:
+            # iterate over layers
+            for node_index, node_id in enumerate(layer):
+                # iterate over nodes in layer
+                node = find_node_with_id(self.node_genome, node_id) # the current node
 
-        # always an output node
-        output_layer = self.get_output_layer_index()
+                # find incoming connections
+                node_inputs = get_incoming_connections(self, node)
 
-        for layer_index in range(1, output_layer+1):
-            # hidden and output layers:
-            layer = self.get_layer(layer_index)
-            for node in layer:
-                node.sum_input = 0
-                node.outputs = 0
-                node.activate(get_incoming_connections(self, node), self.node_genome)
-                # node.outputs = np.clip(node.outputs, -1, 1) # clip output
+                # initialize the node's sum_inputs
+                if node.type == NodeType.INPUT:
+                    ...
+                else:
+                    node.initialize_sum(torch.zeros(1, device=self.device))
 
-        return [node.outputs for node in self.output_nodes()]
+                node.activate(node_inputs, self.node_genome)
+
+        # collect outputs from the last layer
+        outputs = torch.stack([node.outputs for node in self.output_nodes().values()])
+        assert len(outputs) == self.config.num_outputs, f"Number of outputs {len(outputs)} does not match config {self.config.num_outputs}"
+        return outputs
 
     def get_image(self, force_recalculate=False, override_h=None, override_w=None):
         """Returns an image of the network."""
@@ -727,7 +738,7 @@ class CPPN():
             # pixel by pixel (good for debugging/recurrent)
             self.image = self.get_image_data_serial()
         else:
-            # whole image at once (100x faster)
+            # whole image at once (100sx faster)
             self.image = self.get_image_data_parallel()
         return self.image
 
@@ -870,16 +881,14 @@ class CPPN():
         return self.genetic_difference(other) < threshold
 
     def update_with_fitness(self, fit, num_in_species):
+        assert fit >= 0, f"fitness must be non-negative for now, but got {fit}"
         self.fitness = fit
         if(num_in_species > 0):
-            self.adjusted_fitness = self.fitness / num_in_species  # local competition
-            try:
-                assert not torch.isnan(self.adjusted_fitness).any(), f"adjusted fitness was nan: fit: {self.fitness} n_in_species: {num_in_species}"
-            except AssertionError as e:
-                print(e)
+            self.adjusted_fitness = (self.fitness / num_in_species)  # local competition
+            assert not torch.isnan(self.adjusted_fitness).any(), f"adjusted fitness was nan: fit: {self.fitness} n_in_species: {num_in_species}"
         else:
             self.adjusted_fitness = self.fitness
-            print("ERROR: num_in_species was 0")
+            raise(Exception("num_in_species was 0"))
 
 
     def crossover(self, other):
@@ -894,7 +903,7 @@ class CPPN():
                 parent1, parent2 = other, self
         else:
             # fitness undefined, choose randomly
-            if torch.rand() > 0.5:
+            if torch.rand(1)[0] > 0.5:
                 parent1, parent2 = self, other
             else:
                 parent1, parent2 = other, self
