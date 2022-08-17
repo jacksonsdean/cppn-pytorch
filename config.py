@@ -46,17 +46,17 @@ class   Config:
         
         # self.fitness_function = 'test' # should get all white pixels
         # self.fitness_function = 'xor' # for debugging
-        self.fitness_function = 'mse' # default -mse
-        # self.fitness_function = 'haarpsi' # perceptual similarity
+        # self.fitness_function = 'mse' # default -mse
+        self.fitness_function = 'haarpsi' # perceptual similarity
         self.min_fitness = 0
         self.max_fitness = torch.inf
         
         # NEAT specific parameters
         self.use_speciation = True
-        self.init_species_threshold = 5
-        self.species_threshold_delta = 1
+        self.init_species_threshold = 3
+        self.species_threshold_delta = .35
         self.species_stagnation_threshold = 15
-        self.species_selection_ratio = 1.0 # truncation selection within species
+        self.species_selection_ratio = .8 # truncation selection within species
         self.crossover_between_species_probability = 0.001 # .001 in the original NEAT
 
         """DGNA: the probability of adding a node is 0.5 and the
@@ -65,10 +65,10 @@ class   Config:
          probability of adding a connection is 0.04.
         NEAT: probability of adding a node is 0.03 and the
           probability of adding a connection is 0.05."""
-        self.prob_mutate_activation = .15
+        self.prob_mutate_activation = .5
         self.prob_mutate_weight = .80 # .80 in the original NEAT
-        self.prob_add_connection = .05 # 0.05 in the original NEAT
-        self.prob_add_node = .8 # 0.03 in original NEAT
+        self.prob_add_connection = .15 # 0.05 in the original NEAT
+        self.prob_add_node = .35 # 0.03 in original NEAT
         self.prob_remove_node = 0.015
         self.prob_disable_connection = .015
 
