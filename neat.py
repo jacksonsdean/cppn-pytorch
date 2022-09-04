@@ -47,14 +47,11 @@ class NEAT():
         self.fitness_function = config.fitness_function
         
         if not isinstance(config.fitness_function, Callable):
-              self.fitness_function = name_to_fn(config.fitness_function)
+            self.fitness_function = name_to_fn(config.fitness_function)
         
         # normalize fitness function
-        if self.config.min_fitness is not None and self.config.max_fitness is not None:
-            self.fitness_function_normed = lambda x,y: (self.config.fitness_function(x,y) - self.config.min_fitness) / (self.config.max_fitness - self.config.min_fitness)
-        else:
-            self.fitness_function_normed = self.fitness_function # no normalization
-                
+        self.update_fitness_function()
+    
         self.target = target
     
     
@@ -86,6 +83,24 @@ class NEAT():
             return  prob_mutate_activation, prob_mutate_weight, prob_add_connection, prob_add_node, prob_remove_node, prob_disable_connection, weight_mutation_max, prob_reenable_connection
         else:
             return  self.config.prob_mutate_activation, self.config.prob_mutate_weight, self.config.prob_add_connection, self.config.prob_add_node, self.config.prob_remove_node, self.config.prob_disable_connection, self.config.weight_mutation_max, self.config.prob_reenable_connection
+
+    def update_fitness_function(self):
+        """Normalize fitness function if using a normalized fitness function"""
+        if self.config.fitness_schedule is not None:
+            if self.config.fitness_schedule_type == 'alternating':
+                if self.gen==0:
+                    self.fitness_function = self.config.fitness_schedule[0]
+                elif self.gen % self.config.fitness_schedule_period == 0:
+                        self.fitness_function = self.config.fitness_schedule[self.gen // self.config.fitness_schedule_period % len(self.config.fitness_schedule)]
+                if self.debug_output:
+                    print('Fitness function:', self.fitness_function.__name__)
+            else:
+                raise Exception("Unrecognized fitness schedule")
+            
+        if self.config.min_fitness is not None and self.config.max_fitness is not None:
+            self.fitness_function_normed = lambda x,y: (self.config.fitness_function(x,y) - self.config.min_fitness) / (self.config.max_fitness - self.config.min_fitness)
+        else:
+            self.fitness_function_normed = self.fitness_function # no normalization
 
     def update_fitnesses_and_novelty(self):
         if self.show_output:
@@ -307,7 +322,7 @@ class NEAT():
     def run_one_generation(self):
         if self.show_output:
             self.print_fitnesses()
-            
+        self.update_fitness_function()
         #-----------#
         # selection #
         #-----------#
@@ -340,6 +355,7 @@ class NEAT():
         self.update_fitnesses_and_novelty() # evaluate CPPNs
         self.population = sorted(self.population, key=lambda x: x.fitness, reverse=True) # sort by fitness
         self.solution = self.population[0]
+        self.this_gen_best = self.solution
         
         #----------------#
         # record keeping #
@@ -360,7 +376,7 @@ class NEAT():
             self.solution_fitness = self.solution.fitness
             self.solution_generation = self.gen
             self.best_genome = self.solution
-            # save best TODO
+            
                 
         self.fitness_over_time[self.gen:] = self.solution_fitness # record the fitness of the current best over evolutionary time
         self.solutions_over_time.append(copy.deepcopy(self.solution))
@@ -416,9 +432,13 @@ class NEAT():
         plt.imshow(img, cmap='gray')
         plt.show()
         
-    def save_best_img(self,fname):
+    def save_best_img(self, fname):
         img = self.get_best().get_image().cpu().numpy()
         plt.imsave(fname, img, cmap='gray')
+        
+        plt.close()
+        img = self.this_gen_best.get_image().cpu().numpy()
+        plt.imsave(fname.replace(".png","_final.png"), img, cmap='gray')
 
     def save_best_network_image(self):
         best = self.get_best()

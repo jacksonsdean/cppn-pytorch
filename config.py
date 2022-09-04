@@ -48,14 +48,19 @@ class   Config:
         # self.fitness_function = 'xor' # for debugging
         # self.fitness_function = 'mse' # default -mse
         self.fitness_function = 'haarpsi' # perceptual similarity
-        self.min_fitness = 0
-        self.max_fitness = torch.inf
+        self.fitness_schedule_type = "alternating"
+        self.fitness_schedule_period = 10
+        # self.fitness_schedule = ['mse', 'haarpsi', 'ssim', 'psnr', 'fsim']
+        self.fitness_schedule = ['mse', 'psnr']
+        self.fitness_schedule = None
+        self.min_fitness = None
+        self.max_fitness = None
         
         # NEAT specific parameters
         self.use_speciation = True
         self.init_species_threshold = 3
         self.species_threshold_delta = .35
-        self.species_stagnation_threshold = 15
+        self.species_stagnation_threshold = 100
         self.species_selection_ratio = .8 # truncation selection within species
         self.crossover_between_species_probability = 0.001 # .001 in the original NEAT
 
@@ -68,7 +73,7 @@ class   Config:
         self.prob_mutate_activation = .5
         self.prob_mutate_weight = .80 # .80 in the original NEAT
         self.prob_add_connection = .15 # 0.05 in the original NEAT
-        self.prob_add_node = .35 # 0.03 in original NEAT
+        self.prob_add_node = .50 # 0.03 in original NEAT
         self.prob_remove_node = 0.015
         self.prob_disable_connection = .015
 
@@ -105,6 +110,8 @@ class   Config:
         if self.use_radial_distance:
             self.num_inputs += 1
             
+            
+
         
     def apply_condition(self, key, value):
         """Applies an experimental condition to the configuration."""
@@ -125,6 +132,10 @@ class   Config:
         self.activations= [fn.__name__ if not isinstance(fn, str) else fn for fn in self.activations]
         if isinstance(self.fitness_function, Callable):
             self.fitness_function = self.fitness_function.__name__
+        if self.fitness_schedule is not None:
+            for i, fn in enumerate(self.fitness_schedule):
+                if isinstance(fn, Callable):
+                    self.fitness_schedule[i] = fn.__name__
         
         if self.output_activation is None:
             self.output_activation = ""
@@ -134,12 +145,18 @@ class   Config:
     
     def strings_to_fns(self):
         """Converts the activation functions to functions."""
-        self.activations= [name_to_fn(name) if isinstance(name, str) else name for name in self.activations ]
+        self.activations = [name_to_fn(name) if isinstance(name, str) else name for name in self.activations ]
+        
         try:
             self.fitness_function = name_to_fn(self.fitness_function)
         except ValueError:
             self.fitness_function = None
         self.output_activation = name_to_fn(self.output_activation) if isinstance(self.output_activation, str) else self.output_activation
+        
+        if self.fitness_schedule is not None:
+            for i, fn in enumerate(self.fitness_schedule):
+                if isinstance(fn, str):
+                    self.fitness_schedule[i] = name_to_fn(fn)
 
     def to_json(self):
         """Converts the configuration to a json string."""

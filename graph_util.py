@@ -8,7 +8,9 @@ import torch
 import numpy as np
 try:
     import activation_functions as af
+    import fitness_functions as ff
 except ModuleNotFoundError:
+    import cppn_neat.fitness_functions as ff
     import cppn_neat.activation_functions as af
 
 
@@ -48,6 +50,7 @@ def name_to_fn(name) -> callable:
     if name == "":
         return None
     fns = inspect.getmembers(sys.modules[af.__name__])
+    fns.extend(inspect.getmembers(sys.modules[ff.__name__]))
     return fns[[f[0] for f in fns].index(name)][1]
 
 

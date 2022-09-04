@@ -1,6 +1,7 @@
 from piq.feature_extractors import InceptionV3
-from piq import ssim, SSIMLoss, GS, FID, psnr
+from piq import ssim as piq_ssim, SSIMLoss, GS, FID, psnr as piq_psnr, fsim as piq_fsim
 from piq import haarpsi as hwbpsi
+
 import torch
 from torchvision.transforms import Resize
 
@@ -29,23 +30,57 @@ def xor(cppn):
    assert len(fitnesses) == 4
    return max(torch.tensor(0,dtype=torch.float32), 100 - torch.sum(torch.stack(fitnesses)))
 
-def haarpsi(candidate, target):
-   hwbpsi_value = 0
-   f,r = candidate, target
-   f,r = f.unsqueeze(0), r.unsqueeze(0)
+
+def correct_dims(candidate, target):
+   f = candidate.permute(2,0,1)
+   r = target.permute(2,0,1)
    
-   f,r = f/255, r/255
+   if len(f.shape) == 3:
+      f = f.unsqueeze(0)
+   if len(r.shape) == 3:
+      r = r.unsqueeze(0) # fake batch
+
+   if f.max() > 1:
+      f = f/255
+   if r.max() > 1:
+      r = r/255
    
    # pad to 32x32 if necessary
-   if f.shape[2] < 32 or f.shape[3] < 32:
-      f = Resize(32)(f)
-   if r.shape[2] < 32 or r.shape[3] < 32:
-      r = Resize(32)(r)
-   
+   if f.shape[1] < 32 or f.shape[2] < 32:
+      f = Resize((32,32))(f)
+   if r.shape[1] < 32 or r.shape[2] < 32:
+      r = Resize((32,32))(r)
+   # change to 3 channels if necessary
    if(r.size()[1]!=3):
       r = r.repeat(1, 3, 1, 1)
    if(f.size()[1]!=3):
       f = f.repeat(1, 3, 1, 1)
+      
+   return f,r
+
+def haarpsi(candidate, target):
+   f, r = correct_dims(candidate, target)
    # calculate:
-   hwbpsi_value = hwbpsi(f, r)
-   return hwbpsi_value
+   return hwbpsi(f, r)
+
+
+def ssim(candidate, target):
+   f, r = correct_dims(candidate, target)
+   value = piq_ssim(f, r, data_range=1.0, reduction='mean')
+   if value < 0:
+      return torch.tensor(0.0)
+   return value
+
+def psnr(candidate, target):
+   f, r = correct_dims(candidate, target)
+   value = piq_psnr(f, r, data_range=1.0, reduction='mean')
+   if value < 0:
+      return torch.tensor(0.0)
+   return value
+
+def fsim(candidate, target):
+   f, r = correct_dims(candidate, target)
+   value = piq_fsim(f, r)
+   if value < 0:
+      return torch.tensor(0.0)
+   return value
