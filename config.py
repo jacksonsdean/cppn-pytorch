@@ -1,6 +1,8 @@
 """Stores configuration parameters for the CPPN."""
+import inspect
 import json
 import random
+import sys
 from typing import Callable
 
 import torch
@@ -41,6 +43,7 @@ class   Config:
         self.seed = random.randint(0, 100000)
         self.device = "cpu"
         self.normalize_outputs = True
+        self.genome_type = None
         
         self.novelty_selection_ratio_within_species = 0
         self.novelty_adjusted_fitness_proportion = 0
@@ -60,7 +63,7 @@ class   Config:
         # NEAT specific parameters
         self.use_speciation = True
         self.init_species_threshold = 3
-        self.species_threshold_delta = .35
+        self.species_threshold_delta = .1
         self.species_stagnation_threshold = 100
         self.species_selection_ratio = .8 # truncation selection within species
         self.crossover_between_species_probability = 0.001 # .001 in the original NEAT
@@ -130,6 +133,9 @@ class   Config:
 
     def fns_to_strings(self):
         """Converts the activation functions to strings."""
+        if self.genome_type:
+            self.genome_type = self.genome_type.__name__
+        
         self.activations= [fn.__name__ if not isinstance(fn, str) else fn for fn in self.activations]
         if isinstance(self.fitness_function, Callable):
             self.fitness_function = self.fitness_function.__name__
@@ -146,6 +152,22 @@ class   Config:
     
     def strings_to_fns(self):
         """Converts the activation functions to functions."""
+        if self.genome_type:
+            found = False
+            modules = sys.modules
+            for m in modules:
+                try:
+                    for c in inspect.getmembers(m, inspect.isclass):
+                        if c[0] == self.genome_type:
+                            self.genome_type = c[1]
+                            found = True
+                            break
+                    if found:
+                        break
+                except:
+                    continue
+                
+            
         self.activations = [name_to_fn(name) if isinstance(name, str) else name for name in self.activations ]
         
         try:

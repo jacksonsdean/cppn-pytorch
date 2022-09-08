@@ -5,6 +5,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 from tqdm import trange
 from cppn_neat.cppn import *
+from cppn_neat.evolutionary_algorithm import EvolutionaryAlgorithm, calculate_diversity_full
 from cppn_neat.util import *
 from cppn_neat.species import *
 import copy 
@@ -13,77 +14,15 @@ import random
 import copy
 import os
 
-class NEAT():
-    def __init__(self, target, config, debug_output=False, genome_type=CPPN) -> None:
-        self.gen = 0
-        self.next_available_id = 0
-        self.debug_output = debug_output
+class NEAT(EvolutionaryAlgorithm):
+    def __init__(self, target, config, debug_output=False) -> None:
+        super().__init__(target, config, debug_output)
         self.all_species = []
-        self.config = config
-        Node.current_id =  self.config.num_inputs + self.config.num_outputs # reset node id counter
-        self.show_output = True
-        
-        self.diversity_over_time = np.zeros(self.config.num_generations,dtype=float)
-        self.population_over_time = np.zeros(self.config.num_generations,dtype=np.uint8)
-        self.species_over_time = np.zeros(self.config.num_generations,dtype=np.float)
-        self.species_threshold_over_time = np.zeros(self.config.num_generations, dtype=np.float)
-        self.nodes_over_time = np.zeros(self.config.num_generations, dtype=np.float)
-        self.connections_over_time = np.zeros(self.config.num_generations, dtype=np.float)
-        self.fitness_over_time = np.zeros(self.config.num_generations, dtype=np.float)
-        self.species_pops_over_time = []
-        self.solutions_over_time = []
-        self.species_champs_over_time = []
-        self.time_elapsed = 0
-        self.solution_generation = -1
         self.species_threshold = self.config.init_species_threshold
-        self.population = []
-        self.solution = None
-        
-        self.solution_fitness = -math.inf
-        self.best_genome = None
-
-        self.genome_type = genome_type
-        
-        self.fitness_function = config.fitness_function
-        
-        if not isinstance(config.fitness_function, Callable):
-            self.fitness_function = name_to_fn(config.fitness_function)
-        
         # normalize fitness function
         self.update_fitness_function()
     
-        self.target = target
-    
-    
-    def get_mutation_rates(self):
-        """Get the mutate rates for the current generation 
-        if using a mutation rate schedule, else use config values
-
-        Returns:
-            float: prob_mutate_activation,
-            float: prob_mutate_weight,
-            float: prob_add_connection,
-            float: prob_add_node,
-            float: prob_remove_node,
-            float: prob_disable_connection,
-            float: weight_mutation_max, 
-            float: prob_reenable_connection
-        """
-        if(self.config.use_dynamic_mutation_rates):
-            run_progress = self.gen / self.config.num_generations
-            end_mod = self.config.dynamic_mutation_rate_end_modifier
-            prob_mutate_activation   = self.config.prob_mutate_activation   - (self.config.prob_mutate_activation    - end_mod * self.config.prob_mutate_activation)   * run_progress
-            prob_mutate_weight       = self.config.prob_mutate_weight       - (self.config.prob_mutate_weight        - end_mod * self.config.prob_mutate_weight)       * run_progress
-            prob_add_connection      = self.config.prob_add_connection      - (self.config.prob_add_connection       - end_mod * self.config.prob_add_connection)      * run_progress
-            prob_add_node            = self.config.prob_add_node            - (self.config.prob_add_node             - end_mod * self.config.prob_add_node)            * run_progress
-            prob_remove_node         = self.config.prob_remove_node         - (self.config.prob_remove_node          - end_mod * self.config.prob_remove_node)         * run_progress
-            prob_disable_connection  = self.config.prob_disable_connection  - (self.config.prob_disable_connection   - end_mod * self.config.prob_disable_connection)  * run_progress
-            weight_mutation_max      = self.config.weight_mutation_max      - (self.config.weight_mutation_max       - end_mod * self.config.weight_mutation_max)      * run_progress
-            prob_reenable_connection = self.config.prob_reenable_connection - (self.config.prob_reenable_connection  - end_mod * self.config.prob_reenable_connection) * run_progress
-            return  prob_mutate_activation, prob_mutate_weight, prob_add_connection, prob_add_node, prob_remove_node, prob_disable_connection, weight_mutation_max, prob_reenable_connection
-        else:
-            return  self.config.prob_mutate_activation, self.config.prob_mutate_weight, self.config.prob_add_connection, self.config.prob_add_node, self.config.prob_remove_node, self.config.prob_disable_connection, self.config.weight_mutation_max, self.config.prob_reenable_connection
-
+   
     def update_fitness_function(self):
         """Normalize fitness function if using a normalized fitness function"""
         if self.config.fitness_schedule is not None:
@@ -102,48 +41,7 @@ class NEAT():
         else:
             self.fitness_function_normed = self.fitness_function # no normalization
 
-    def update_fitnesses_and_novelty(self):
-        if self.show_output:
-            pbar = trange(len(self.population))
-        else:
-            pbar = range(len(self.population))
-        for i in pbar:
-            if self.show_output:
-                pbar.set_description_str("Evaluating gen " + str(self.gen) + ": ")
-            
-            if self.fitness_function.__name__ == "xor":
-                self.population[i].fitness = self.fitness_function(self.population[i])
-            else:
-                self.population[i].fitness = self.fitness_function_normed(self.population[i].get_image(), self.target)
-            
-        if self.show_output:
-            pbar = trange(len(self.population))
-        else:
-            pbar = range(len(self.population))
-        # for i in pbar:
-        #     if self.show_output:
-        #         pbar.set_description_str("Simulating gen " + str(self.gen) + ": ")
-        #     self.population[i].wait_for_simulation()
-            
-        for i, g in enumerate(self.population):
-            self.population[i].update_with_fitness(g.fitness, count_members_of_species(self.population, self.population[i].species_id))
-        
-        if(self.config.novelty_selection_ratio_within_species > 0 or self.config.novelty_adjusted_fitness_proportion > 0):
-            # novelties = novelty_ae.get_ae_novelties(self.population)
-            novelties = np.zeros(len(self.population))
-            for i, n in enumerate(novelties):
-                self.population[i].novelty = n
-                self.novelty_archive = update_solution_archive(self.novelty_archive, self.population[i], self.config.novelty_archive_len, self.config.novelty_k)
-        
-        for i in range(len(self.population)):
-            if self.config.novelty_adjusted_fitness_proportion > 0:
-                global_novelty = np.mean([g.novelty for g in self.novelty_archive])
-                if(global_novelty==0): global_novelty=0.001
-                adj_fit = self.population[i].adjusted_fitness
-                adj_novelty =  self.population[i].novelty / global_novelty
-                prop = self.config.novelty_adjusted_fitness_proportion
-                self.population[i].adjusted_fitness = (1-prop) * adj_fit  + prop * adj_novelty 
-        self.update_num_species_offspring()
+  
     
     def update_num_species_offspring(self):
         for sp in self.all_species:
@@ -179,50 +77,6 @@ class NEAT():
             # TODO
             sorted_species = sorted(self.all_species, key=lambda x: x.avg_fitness, reverse=True)
             sorted_species[0].allowed_offspring = self.config.population_size
-
-    def show_fitness_curve(self):
-        # plt.close()
-        plt.plot(self.fitness_over_time, label="Highest fitness")
-        plt.title("Fitness over time")
-        plt.ylabel("Fitness")
-        plt.xlabel("Generation")
-        plt.legend()
-        plt.show()
-        
-    def show_diversity_curve(self):
-        # plt.close()
-        plt.plot(self.diversity_over_time, label="Diversity")
-        plt.title("Diversity over time")
-        plt.ylabel("Diversity")
-        plt.xlabel("Generation")
-        plt.legend()
-        plt.show()
-        
-    def print_fitnesses(self):
-        div = calculate_diversity_full(self.population, self.all_species)
-        num_species = count_number_of_species(self.population)
-        print("Generation", self.gen, "="*100)
-        print(f" |-Best: {self.get_best().id} ({self.get_best().fitness:.4f})")
-        print(f" |  Average fitness: {torch.mean(torch.stack([i.fitness for i in self.population])):.7f} | adjusted: {torch.mean(torch.stack([i.adjusted_fitness for i in self.population])):.7f}")
-        print(f" |  Diversity: std: {div[0]:.3f} | avg: {div[1]:.3f} | max: {div[2]:.3f}")
-        print(f" |  Connections: avg. {get_avg_number_of_connections(self.population):.2f} max. {get_max_number_of_connections(self.population)}  | H. Nodes: avg. {get_avg_number_of_hidden_nodes(self.population):.2f} max: {get_max_number_of_hidden_nodes(self.population)}")
-        for individual in self.population:
-            print(f" |     Individual {individual.id} ({len(individual.hidden_nodes())}n, {len(list(individual.enabled_connections()))}c, s: {individual.species_id} fit: {individual.fitness:.4f}")
-        
-        print(" |-Species:")
-        thresh_symbol = '='
-        if self.config.num_generations>1 and self.species_threshold_over_time[self.gen-2]<self.species_threshold and self.species_threshold_over_time[self.gen-2]!=0:
-            thresh_symbol = '▲' 
-        if self.config.num_generations>1 and self.species_threshold_over_time[self.gen-2]>self.species_threshold:
-            thresh_symbol = '▼'
-        print(f" |  Count: {num_species} / {self.config.species_target} | threshold: {self.species_threshold:.2f} {thresh_symbol}") 
-        print(f" |  Best species (avg. fitness): {sorted(self.all_species, key=lambda x: x.avg_fitness if x.population_count > 0 else -1000000000, reverse=True)[0].id}")
-        for species in self.all_species:
-            if species.population_count > 0:
-                print(f" |    Species {species.id:03d} |> fit: {species.avg_fitness:.4f} | adj: {species.sum_adj_fitness:.4f} | stag: {self.gen-species.last_improvement} | pop: {species.population_count} | offspring: {species.allowed_offspring if species.allowed_offspring > 0 else 'X'}")
-
-        print(f" Gen "+ str(self.gen), f"fitness: {self.get_best().fitness:.4f}")
-        print()
 
     def neat_selection_and_reproduction(self):
         new_children = []
@@ -263,6 +117,7 @@ class NEAT():
             # print("Creating", sp.allowed_offspring, "offspring for species", sp.id, "with", len(sp.members), "members")
             for i in range(sp.allowed_offspring):
                 if len(sp.members) == 0: break
+                child = None # the child to be added to the population
                 # inheritance
                 parent1 = np.random.choice(sp.members, size=max(len(sp.members), 1))[0] # pick 1 random parent
                 #crossover
@@ -287,6 +142,7 @@ class NEAT():
                     else:
                         continue
 
+                assert child is not None
                 self.mutate(child)
                 assert child is not None
                 new_children.extend([child]) # add children to the new_children list
@@ -340,9 +196,6 @@ class NEAT():
             for c in self.population:
                 assert c.species_id is not None
                 
-            # for sp in self.all_species:
-                # print("Species", sp.id, "has", sp.population_count, "members")
-            
         else:
             self.population = truncation_selection(self.population, self.config) # truncation
             new_children.extend(classic_selection_and_reproduction(self.config, self.population, self.all_species, self.gen, self.get_mutation_rates()))
@@ -362,43 +215,18 @@ class NEAT():
         #----------------#
         # diversity:
         # std_distance, avg_distance, max_diff = calculate_diversity(self.population, self.all_species)
-        std_distance, avg_distance, max_diff = calculate_diversity_full(self.population)
-        n_nodes = get_avg_number_of_hidden_nodes(self.population)
-        n_connections = get_avg_number_of_connections(self.population)
-        self.diversity_over_time[self.gen:] = avg_distance
-        self.population_over_time[self.gen:] = float(len(self.population))
-        self.nodes_over_time[self.gen:] = n_nodes
-        self.connections_over_time[self.gen:] = n_connections
-
-        # fitness
-        if self.population[0].fitness > self.solution_fitness: # if the new parent is the best found so far
-            self.solution = self.population[0]                 # update best solution records
-            self.solution_fitness = self.solution.fitness
-            self.solution_generation = self.gen
-            self.best_genome = self.solution
-            
-                
-        self.fitness_over_time[self.gen:] = self.solution_fitness # record the fitness of the current best over evolutionary time
-        self.solutions_over_time.append(copy.deepcopy(self.solution))
-
+        self.record_keeping()
+       
+    def record_keeping(self):
+        super().record_keeping()
         # species
         # adjust the species threshold to get closer to the right number of species
         if self.config.use_speciation:
             delta = self.config.species_threshold_delta
-            
-            # TODO testing:
-            # automatically determine delta
-            # delta = avg_distance - self.diversity_over_time[self.gen-1]
-            # delta *= 1.5
-            # delta = abs(delta)
-            # delta = max(self.config.species_threshold_delta, delta)
-            ###############################
-            
             if(self.num_species>self.config.species_target): self.species_threshold+=delta
             if(self.num_species<self.config.species_target): self.species_threshold-=delta
             self.species_threshold = max(0.010, self.species_threshold)
             # self.species_threshold = max(0.10, self.species_threshold)
-        
         
         self.species_over_time[self.gen:] = self.num_species
         self.species_threshold_over_time[self.gen:] = self.species_threshold
@@ -406,44 +234,46 @@ class NEAT():
         
         champs = get_current_species_champs(self.population, self.all_species)
         self.species_champs_over_time.append(champs) 
-
-        # if self.show_output:
-            # self.save_best_network_image()
     
+    def update_fitnesses_and_novelty(self):
+        super().update_fitnesses_and_novelty()
+        for i, g in enumerate(self.population):
+            self.update_individual_with_fitness(g, g.fitness, count_members_of_species(self.population, g.species_id))
+            
+        for i in range(len(self.population)):
+                if self.config.novelty_adjusted_fitness_proportion > 0:
+                    global_novelty = np.mean([g.novelty for g in self.novelty_archive])
+                    if(global_novelty==0): global_novelty=0.001
+                    adj_fit = self.population[i].adjusted_fitness
+                    adj_novelty =  self.population[i].novelty / global_novelty
+                    prop = self.config.novelty_adjusted_fitness_proportion
+                    self.population[i].adjusted_fitness = (1-prop) * adj_fit  + prop * adj_novelty 
+        self.update_num_species_offspring()
     
-    def mutate(self, child):
-        rates = self.get_mutation_rates()
-        child.fitness, child.adjusted_fitness = 0, 0 # new fitnesses after mutation
-        child.mutate(rates)
-    
-    def get_best(self):
-        max_fitness_individual = max(self.population, key=lambda x: x.fitness)
-        return max_fitness_individual
-    
-    def print_best(self):
-        best = self.get_best()
-        print("Best:", best.id, best.fitness)
+    def update_individual_with_fitness(self, individual, fit, num_in_species):
+        assert fit >= 0, f"fitness must be non-negative for now, but got {fit}"
+        individual.fitness = fit
+        if(num_in_species > 0):
+            individual.adjusted_fitness = (individual.fitness / num_in_species)  # local competition
+            assert not torch.isnan(individual.adjusted_fitness).any(), f"adjusted fitness was nan: fit: {individual.fitness} n_in_species: {num_in_species}"
+        else:
+            self.adjusted_fitness = individual.fitness
+            raise(Exception("num_in_species was 0"))
         
-    def show_best(self):
-        print()
-        self.print_best()
-        self.save_best_network_image()
-        img = self.get_best().get_image().cpu().to(np.uint8).numpy()
-        plt.imshow(img, cmap='gray')
-        plt.show()
-        
-    def save_best_img(self, fname):
-        img = self.get_best().get_image().cpu().numpy()
-        plt.imsave(fname, img, cmap='gray')
-        
-        plt.close()
-        img = self.this_gen_best.get_image().cpu().numpy()
-        plt.imsave(fname.replace(".png","_final.png"), img, cmap='gray')
-
-    def save_best_network_image(self):
-        best = self.get_best()
-        path = f"{self.config.output_dir}/genomes/best_{self.gen}.png"
-        visualize_network(self.get_best(), sample=False, save_name=path, extra_text=f"Run {self.run_number} Generation: " + str(self.gen) + " fit: " + str(best.fitness) + " species: " + str(best.species_id))
+    def print_fitnesses(self):
+        super().print_fitnesses()
+        print(" |-Species:")
+        num_species = count_number_of_species(self.population)
+        thresh_symbol = '='
+        if self.config.num_generations>1 and self.species_threshold_over_time[self.gen-2]<self.species_threshold and self.species_threshold_over_time[self.gen-2]!=0:
+            thresh_symbol = '▲' 
+        if self.config.num_generations>1 and self.species_threshold_over_time[self.gen-2]>self.species_threshold:
+            thresh_symbol = '▼'
+        print(f" |  Count: {num_species} / {self.config.species_target} | threshold: {self.species_threshold:.2f} {thresh_symbol}") 
+        print(f" |  Best species (avg. fitness): {sorted(self.all_species, key=lambda x: x.avg_fitness if x.population_count > 0 else -1000000000, reverse=True)[0].id}")
+        for species in self.all_species:
+            if species.population_count > 0:
+                print(f" |    Species {species.id:03d} |> fit: {species.avg_fitness:.4f} | adj: {species.sum_adj_fitness:.4f} | stag: {self.gen-species.last_improvement} | pop: {species.population_count} | offspring: {species.allowed_offspring if species.allowed_offspring > 0 else 'X'}")
 
 
 def classic_selection_and_reproduction(c, population, all_species, generation_num, mutation_rates):
@@ -520,31 +350,3 @@ def calculate_diversity(population, all_species):
     return std_distance, avg_distance, max_diff
 
     
-def calculate_diversity_full(population, all_species=None):
-    # very slow, compares every genome against every other
-    diffs = []
-    for i in population:
-        for j in population:
-            if i== j: continue
-            diffs.append(i.genetic_difference(j))
-
-    std_distance = np.std(diffs)
-    avg_distance = np.mean(diffs)
-    max_diff = np.max(diffs)if(len(diffs)>0) else 0
-    return std_distance, avg_distance, max_diff
-
-def update_solution_archive(solution_archive, genome, max_archive_length, novelty_k):
-    # genome should already have novelty score
-    # update existing novelty scores:
-    # for i, archived_solution in enumerate(solution_archive):
-    #     solution_archive[i].novelty = get_novelty(solution_archive, genome, novelty_k)
-    solution_archive = sorted(solution_archive, reverse=True, key = lambda s: s.novelty)
-
-    if(len(solution_archive) >= max_archive_length):
-        if(genome.novelty > solution_archive[-1].novelty):
-            # has higher novelty than at least one genome in archive
-            solution_archive[-1] = genome # replace least novel genome in archive
-    else:
-        solution_archive.append(genome)
-    return solution_archive
-

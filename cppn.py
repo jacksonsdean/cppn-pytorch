@@ -263,6 +263,9 @@ class CPPN():
 
     def __init__(self, config, nodes = None, connections = None) -> None:
         self.device = config.device
+        
+        torch.manual_seed(config.seed)
+        
         if self.device is None:
             # no device specified, try to use GPU
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -274,7 +277,9 @@ class CPPN():
         self.species_id = 0
         self.id = CPPN.get_id()
         
-        torch.manual_seed(config.seed)
+        self.fitness = 0
+        self.novelty = 0
+        self.adjusted_fitness = 0
 
         self.n_inputs = 2 # x, y
         if config.use_radial_distance:
@@ -468,7 +473,7 @@ class CPPN():
 
     def mutate(self, rates=None):
         """Mutates the CPPN based on its config or the optionally provided rates."""
-        self.fitness, self.adjusted_fitness = 0, 0 # new fitnesses after mutation
+        self.fitness, self.adjusted_fitness, self.novelty = 0, 0, 0 # new fitnesses after mutation
         
         if rates is None:
             add_node = self.config.prob_add_node
@@ -889,15 +894,7 @@ class CPPN():
         # returns whether other is the same species as self
         return self.genetic_difference(other) < threshold
 
-    def update_with_fitness(self, fit, num_in_species):
-        assert fit >= 0, f"fitness must be non-negative for now, but got {fit}"
-        self.fitness = fit
-        if(num_in_species > 0):
-            self.adjusted_fitness = (self.fitness / num_in_species)  # local competition
-            assert not torch.isnan(self.adjusted_fitness).any(), f"adjusted fitness was nan: fit: {self.fitness} n_in_species: {num_in_species}"
-        else:
-            self.adjusted_fitness = self.fitness
-            raise(Exception("num_in_species was 0"))
+    
 
 
     def crossover(self, other):
