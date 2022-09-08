@@ -114,6 +114,11 @@ class   Config:
         if self.use_radial_distance:
             self.num_inputs += 1
             
+        # MAP-Elites
+        self.map_elites_resolution = [10,10]
+        self.map_elites_max_values = [1,1]
+        self.map_elites_min_values = [0,0]
+            
             
 
         
