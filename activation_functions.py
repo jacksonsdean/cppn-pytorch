@@ -26,7 +26,7 @@ def tanh(x):
 
 def relu(x):
     """Returns the rectified linear unit of the input."""
-    return x * (x > 0)
+    return torch.tensor(x * (x > 0), dtype=torch.float32)
 
 def tanh_sig(x):
     """Returns the sigmoid of the hyperbolic tangent of the input."""
@@ -34,13 +34,13 @@ def tanh_sig(x):
 
 def pulse(x):
     """Return the pulse fn of the input."""
-    return 2*(x % 1 < .5) -1
+    return 2.0*(x % 1 < .5) -1.0
 
 
 def hat(x):
     """Returns the hat function of the input."""
     x = 1.0 - torch.abs(x)
-    x= torch.clip(x, 0, 1)
+    x = torch.clip(x, 0, 1).to(torch.float32)
     return x
 
 def round_activation(x):

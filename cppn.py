@@ -8,7 +8,6 @@ from typing import Callable
 # import numpy as np
 import torch
 
-from cppn_neat.util import visualize_network
 try:
     from activation_functions import identity
     from graph_util import name_to_fn, choose_random_function, is_valid_connection
@@ -235,7 +234,7 @@ class Connection(Gene):
 class CPPN():
     """A CPPN Object with Nodes and Connections."""
 
-    pixel_inputs = torch.zeros((0, 0, 0)) # (res_h, res_w, n_inputs)
+    pixel_inputs = torch.zeros((0, 0, 0), dtype=torch.float32) # (res_h, res_w, n_inputs)
     current_id = 0
     node_indexer = None
     
@@ -249,7 +248,7 @@ class CPPN():
         y_vals = torch.linspace(-.5, .5, res_h, device=device)
 
         # initialize to 0s
-        CPPN.pixel_inputs = torch.zeros((res_h, res_w, n_inputs), device=device)
+        CPPN.pixel_inputs = torch.zeros((res_h, res_w, n_inputs), dtype=torch.float32, device=device)
 
         # assign values:
         for y in range(res_h):
@@ -260,7 +259,7 @@ class CPPN():
                     this_pixel.append(math.sqrt(y_vals[y]**2 + x_vals[x]**2))
                 if use_bias:
                     this_pixel.append(1.0) # bias = 1.0
-                CPPN.pixel_inputs[y][x] = torch.tensor(this_pixel, device=device)
+                CPPN.pixel_inputs[y][x] = torch.tensor(this_pixel, dtype=torch.float32, device=device)
 
     def __init__(self, config, nodes = None, connections = None) -> None:
         self.device = config.device
@@ -748,8 +747,8 @@ class CPPN():
         network has recurrent connections."""
         res_h, res_w = self.config.res_h, self.config.res_w
         pixels = []
-        for x in torch.linspace(-.5, .5, res_w,device=self.device):
-            for y in torch.linspace(-.5, .5, res_h,device=self.device):
+        for x in torch.linspace(-.5, .5, res_w, dtype=torch.float32, device=self.device):
+            for y in torch.linspace(-.5, .5, res_h,dtype=torch.float32, device=self.device):
                 outputs = self.eval([x, y])
                 pixels.extend(outputs)
         if len(self.config.color_mode)>2:
@@ -789,7 +788,7 @@ class CPPN():
                 if node.type == NodeType.INPUT:
                     starting_input = CPPN.pixel_inputs[:,:,node_index]
                 else:
-                    starting_input = torch.zeros((res_h, res_w),device=self.device)
+                    starting_input = torch.zeros((res_h, res_w), dtype=torch.float32, device=self.device)
 
                 node.initialize_sum(starting_input)
                 # initialize the sum_inputs for this node
@@ -805,26 +804,36 @@ class CPPN():
             outputs = torch.reshape(outputs, (res_h, res_w))
 
         self.image = outputs
-
-        self.normalize_image()
+        
+        if self.config.normalize_outputs:
+            self.normalize_image()
+        else:
+            # just convert to 0-255 range and uints
+            self.image = self.image * 255
+            self.image = self.image.to(torch.uint8)
 
         return self.image
 
     def normalize_image(self):
-        """Normalize from -1 through 1 to 0 through 255 and convert to ints"""
-        self.image = 1.0 - torch.abs(self.image)
+        """Normalize from outputs (any range) to 0 through 255 and convert to ints"""
+        assert self.image is not None, "No image to normalize"
+        assert self.image.dtype == torch.float32, f"Image is not float32, is {self.image.dtype}"
+        
+        # image = 1.0 - torch.abs(self.image)
         max_value = torch.max(self.image)
         min_value = torch.min(self.image)
         image_range = max_value - min_value
         self.image -= min_value
-        if self.config.color_mode == 'HSL':
-            self.image = hsv2rgb(self.image) # convert to RGB
-        self.image *= 255
         if image_range != 0: # prevent divide by 0
             self.image /= image_range
+            
+        if self.config.color_mode == 'HSL':
+            # assume output is HSL and convert to RGB
+            self.image = hsv2rgb(self.image) # convert to RGB
         
-        self.image = self.image.to(dtype=torch.uint8)
-
+        self.image *= 255
+        self.image = self.image.to(torch.uint8)
+        
     def genetic_difference(self, other) -> float:
         # only enabled connections, sorted by innovation id
         this_cxs = sorted(self.enabled_connections(),

@@ -40,6 +40,7 @@ class   Config:
         self.activations = get_all()
         self.seed = random.randint(0, 100000)
         self.device = "cpu"
+        self.normalize_outputs = True
         
         self.novelty_selection_ratio_within_species = 0
         self.novelty_adjusted_fitness_proportion = 0
@@ -50,9 +51,9 @@ class   Config:
         self.fitness_function = 'haarpsi' # perceptual similarity
         self.fitness_schedule_type = "alternating"
         self.fitness_schedule_period = 10
-        # self.fitness_schedule = ['mse', 'haarpsi', 'ssim', 'psnr', 'fsim']
-        self.fitness_schedule = ['mse', 'psnr']
-        self.fitness_schedule = None
+        self.fitness_schedule = ["mse", "haarpsi", "ssim", "psnr", "fsim"]
+        # self.fitness_schedule = ["mse", "psnr"]
+        # self.fitness_schedule = None
         self.min_fitness = None
         self.max_fitness = None
         
@@ -73,7 +74,7 @@ class   Config:
         self.prob_mutate_activation = .5
         self.prob_mutate_weight = .80 # .80 in the original NEAT
         self.prob_add_connection = .15 # 0.05 in the original NEAT
-        self.prob_add_node = .50 # 0.03 in original NEAT
+        self.prob_add_node = .35 # 0.03 in original NEAT
         self.prob_remove_node = 0.015
         self.prob_disable_connection = .015
 
