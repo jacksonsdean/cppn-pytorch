@@ -50,8 +50,8 @@ class   Config:
         
         # self.fitness_function = 'test' # should get all white pixels
         # self.fitness_function = 'xor' # for debugging
-        # self.fitness_function = 'mse' # default -mse
-        self.fitness_function = 'haarpsi' # perceptual similarity
+        self.fitness_function = 'mse' # default -mse
+        # self.fitness_function = 'haarpsi' # perceptual similarity
         self.fitness_schedule_type = "alternating"
         self.fitness_schedule_period = 10
         self.fitness_schedule = ["mse", "haarpsi", "ssim", "psnr", "fsim"]

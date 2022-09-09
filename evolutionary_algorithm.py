@@ -126,6 +126,8 @@ class EvolutionaryAlgorithm(object):
         return solution_archive
     
     def record_keeping(self):
+        self.solution = self.population[0]
+        self.this_gen_best = self.solution
         std_distance, avg_distance, max_diff = calculate_diversity_full(self.population)
         n_nodes = get_avg_number_of_hidden_nodes(self.population)
         n_connections = get_avg_number_of_connections(self.population)
