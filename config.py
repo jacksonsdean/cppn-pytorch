@@ -76,9 +76,9 @@ class   Config:
           probability of adding a connection is 0.05."""
         self.prob_mutate_activation = .5
         self.prob_mutate_weight = .80 # .80 in the original NEAT
-        self.prob_add_connection = .15 # 0.05 in the original NEAT
-        self.prob_add_node = .35 # 0.03 in original NEAT
-        self.prob_remove_node = 0.015
+        self.prob_add_connection = .25 # 0.05 in the original NEAT
+        self.prob_add_node = .65 # 0.03 in original NEAT
+        self.prob_remove_node = 0.15
         self.prob_disable_connection = .015
 
         self.max_weight = 3.0
@@ -115,10 +115,14 @@ class   Config:
             self.num_inputs += 1
             
         # MAP-Elites
-        self.map_elites_resolution = [10,10]
-        self.map_elites_max_values = [1,1]
-        self.map_elites_min_values = [0,0]
+        self.map_elites_resolution = [5,5]
+        self.map_elites_max_values = [15000,20]
+        self.map_elites_min_values = [100,8]
             
+
+        self.novelty_archive_len = 20
+        self.novelty_k = 5
+        self.autoencoder_frequency = 5
             
 
         

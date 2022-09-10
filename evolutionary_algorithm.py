@@ -1,5 +1,7 @@
 import copy
 import math
+import random
+import time
 from typing import Callable
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,7 +9,8 @@ from tqdm import trange
 from cppn_neat.cppn import Node
 import torch
 from cppn_neat.graph_util import name_to_fn
-from cppn_neat.util import get_avg_number_of_connections, get_avg_number_of_hidden_nodes, get_max_number_of_connections, visualize_network
+from cppn_neat.autoencoder import novelty_ae, initialize_encoders
+from cppn_neat.util import get_avg_number_of_connections, get_avg_number_of_hidden_nodes, get_max_number_of_connections, visualize_network, get_max_number_of_hidden_nodes
 
 class EvolutionaryAlgorithm(object):
     def __init__(self, target, config, debug_output=False) -> None:
@@ -33,6 +36,7 @@ class EvolutionaryAlgorithm(object):
         self.population = []
         self.solution = None
         self.this_gen_best = None
+        self.novelty_archive = []
         
         self.run_number = 0
         
@@ -77,10 +81,24 @@ class EvolutionaryAlgorithm(object):
         else:
             return  self.config.prob_mutate_activation, self.config.prob_mutate_weight, self.config.prob_add_connection, self.config.prob_add_node, self.config.prob_remove_node, self.config.prob_disable_connection, self.config.weight_mutation_max, self.config.prob_reenable_connection
 
-    def evolve(self):
-        raise NotImplementedError()
+    def evolve(self, run_number = 1, show_output=True):
+        self.start_time = time.time()
+        self.run_number = run_number
+        self.show_output = show_output or self.debug_output
+        for i in range(self.config.population_size): # only create parents for initialization (the mu in mu+lambda)
+            self.population.append(self.genome_type(self.config)) # generate new random individuals as parents
+            
+        # update novelty encoder   
+        initialize_encoders(self.config, self.target)  
+        for g in self.population: g.get_image()
+        novelty_ae.update_novelty_network(self.population)
+
     def run_one_generation(self):
-        raise NotImplementedError()
+        if self.show_output:
+            self.print_fitnesses()
+        # update the autoencoder used for novelty
+        if self.gen % self.config.autoencoder_frequency == 0:
+            novelty_ae.update_novelty_network(self.population)
     
     def update_fitnesses_and_novelty(self):
         if self.show_output:
@@ -103,12 +121,10 @@ class EvolutionaryAlgorithm(object):
         else:
             pbar = range(len(self.population))
             
-        if(self.config.novelty_selection_ratio_within_species > 0 or self.config.novelty_adjusted_fitness_proportion > 0):
-            # novelties = novelty_ae.get_ae_novelties(self.population)
-            novelties = np.zeros(len(self.population))
-            for i, n in enumerate(novelties):
-                self.population[i].novelty = n
-                self.novelty_archive = self.update_solution_archive(self.novelty_archive, self.population[i], self.config.novelty_archive_len, self.config.novelty_k)
+        novelties = novelty_ae.get_ae_novelties(self.population)
+        for i, n in enumerate(novelties):
+            self.population[i].novelty = n
+            self.novelty_archive = self.update_solution_archive(self.novelty_archive, self.population[i], self.config.novelty_archive_len, self.config.novelty_k)
     
     def update_solution_archive(self, solution_archive, genome, max_archive_length, novelty_k):
         # genome should already have novelty score
@@ -128,7 +144,8 @@ class EvolutionaryAlgorithm(object):
     def record_keeping(self):
         self.solution = self.population[0]
         self.this_gen_best = self.solution
-        std_distance, avg_distance, max_diff = calculate_diversity_full(self.population)
+        # std_distance, avg_distance, max_diff = calculate_diversity_full(self.population)
+        std_distance, avg_distance, max_diff = calculate_diversity_stochastic(self.population)
         n_nodes = get_avg_number_of_hidden_nodes(self.population)
         n_connections = get_avg_number_of_connections(self.population)
         self.diversity_over_time[self.gen:] = avg_distance
@@ -148,7 +165,6 @@ class EvolutionaryAlgorithm(object):
         self.solutions_over_time.append(copy.deepcopy(self.solution))   
         
     def show_fitness_curve(self):
-        # plt.close()
         plt.plot(self.fitness_over_time, label="Highest fitness")
         plt.title("Fitness over time")
         plt.ylabel("Fitness")
@@ -157,7 +173,6 @@ class EvolutionaryAlgorithm(object):
         plt.show()
         
     def show_diversity_curve(self):
-        # plt.close()
         plt.plot(self.diversity_over_time, label="Diversity")
         plt.title("Diversity over time")
         plt.ylabel("Diversity")
@@ -189,7 +204,6 @@ class EvolutionaryAlgorithm(object):
     def save_best_img(self, fname):
         img = self.get_best().get_image().cpu().numpy()
         plt.imsave(fname, img, cmap='gray')
-        
         plt.close()
         img = self.this_gen_best.get_image().cpu().numpy()
         plt.imsave(fname.replace(".png","_final.png"), img, cmap='gray')
@@ -198,10 +212,13 @@ class EvolutionaryAlgorithm(object):
         best = self.get_best()
         path = f"{self.config.output_dir}/genomes/best_{self.gen}.png"
         visualize_network(self.get_best(), sample=False, save_name=path, extra_text=f"Run {self.run_number} Generation: " + str(self.gen) + " fit: " + str(best.fitness) + " species: " + str(best.species_id))
-    
      
     def print_fitnesses(self):
-        div = calculate_diversity_full(self.population)
+        div = calculate_diversity_stochastic(self.population)
+        for i in range(len(self.population)):
+            self.population[i].fitness = torch.tensor(self.population[i].fitness,dtype=torch.float32) if type(self.population[i].fitness) !=torch.Tensor else self.population[i].fitness
+            self.population[i].adjusted_fitness = torch.tensor(self.population[i].adjusted_fitness,dtype=torch.float32) if type(self.population[i].adjusted_fitness) != torch.Tensor else self.population[i].adjusted_fitness
+       
         print("Generation", self.gen, "="*100)
         print(f" |-Best: {self.get_best().id} ({self.get_best().fitness:.4f})")
         print(f" |  Average fitness: {torch.mean(torch.stack([i.fitness for i in self.population])):.7f} | adjusted: {torch.mean(torch.stack([i.adjusted_fitness for i in self.population])):.7f}")
@@ -221,6 +238,21 @@ def calculate_diversity_full(population):
         for j in population:
             if i== j: continue
             diffs.append(i.genetic_difference(j))
+
+    std_distance = np.std(diffs)
+    avg_distance = np.mean(diffs)
+    max_diff = np.max(diffs)if(len(diffs)>0) else 0
+    return std_distance, avg_distance, max_diff
+
+def calculate_diversity_stochastic(population):
+    # compare 10% of population
+    diffs = []
+    pop = population
+    for i in range(int(len(population)/10)):
+        i = random.choice(pop)
+        pop.remove(i)
+        j = random.choice(pop)
+        diffs.append(i.genetic_difference(j))
 
     std_distance = np.std(diffs)
     avg_distance = np.mean(diffs)

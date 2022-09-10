@@ -151,16 +151,10 @@ class NEAT(EvolutionaryAlgorithm):
         return new_children
 
     def evolve(self, run_number = 1, show_output=True):
-        self.start_time = time.time()
+        super().evolve()
         try:
-            self.run_number = run_number
-            self.show_output = show_output or self.debug_output
-            for i in range(self.config.population_size): # only create parents for initialization (the mu in mu+lambda)
-                self.population.append(self.genome_type(self.config)) # generate new random individuals as parents
-            
             if self.config.use_speciation:
                 assign_species(self.all_species, self.population, self.population, self.species_threshold, Species)
-
             # Run NEAT
             pbar = trange(self.config.num_generations, desc=f"Run {self.run_number}")
             self.update_fitnesses_and_novelty()
@@ -176,8 +170,9 @@ class NEAT(EvolutionaryAlgorithm):
         self.time_elapsed = self.end_time - self.start_time     
 
     def run_one_generation(self):
-        if self.show_output:
-            self.print_fitnesses()
+        super().run_one_generation()
+
+       
         self.update_fitness_function()
         #-----------#
         # selection #
@@ -207,8 +202,7 @@ class NEAT(EvolutionaryAlgorithm):
         #------------#
         self.update_fitnesses_and_novelty() # evaluate CPPNs
         self.population = sorted(self.population, key=lambda x: x.fitness, reverse=True) # sort by fitness
-        self.solution = self.population[0]
-        self.this_gen_best = self.solution
+        
         
         #----------------#
         # record keeping #
