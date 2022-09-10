@@ -122,7 +122,7 @@ class   Config:
 
         self.novelty_archive_len = 20
         self.novelty_k = 5
-        self.autoencoder_frequency = 5
+        self.autoencoder_frequency = 10
             
 
         
