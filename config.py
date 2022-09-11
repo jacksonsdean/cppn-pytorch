@@ -50,13 +50,14 @@ class   Config:
         
         # self.fitness_function = 'test' # should get all white pixels
         # self.fitness_function = 'xor' # for debugging
-        self.fitness_function = 'mse' # default -mse
+        # self.fitness_function = 'mse' # default -mse
+        self.fitness_function = 'average' # all fitness functions are averaged
         # self.fitness_function = 'haarpsi' # perceptual similarity
         self.fitness_schedule_type = "alternating"
         self.fitness_schedule_period = 10
-        self.fitness_schedule = ["mse", "haarpsi", "ssim", "psnr", "fsim"]
+        # self.fitness_schedule = ["mse", "haarpsi", "ssim", "psnr", "fsim"]
         # self.fitness_schedule = ["mse", "psnr"]
-        # self.fitness_schedule = None
+        self.fitness_schedule = None
         self.min_fitness = None
         self.max_fitness = None
         
@@ -115,9 +116,9 @@ class   Config:
             self.num_inputs += 1
             
         # MAP-Elites
-        self.map_elites_resolution = [5,5]
-        self.map_elites_max_values = [15000,20]
-        self.map_elites_min_values = [100,8]
+        self.map_elites_resolution = [6,6]
+        self.map_elites_max_values = [15000,30]
+        self.map_elites_min_values = [100,9]
             
 
         self.novelty_archive_len = 20

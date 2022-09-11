@@ -91,9 +91,29 @@ class EvolutionaryAlgorithm(object):
         # update novelty encoder   
         initialize_encoders(self.config, self.target)  
         for g in self.population: g.get_image()
-        novelty_ae.update_novelty_network(self.population)
+        # novelty_ae.update_novelty_network(self.population)
+
+    def update_fitness_function(self):
+        """Normalize fitness function if using a normalized fitness function"""
+        if self.config.fitness_schedule is not None:
+            if self.config.fitness_schedule_type == 'alternating':
+                if self.gen==0:
+                    self.fitness_function = self.config.fitness_schedule[0]
+                elif self.gen % self.config.fitness_schedule_period == 0:
+                        self.fitness_function = self.config.fitness_schedule[self.gen // self.config.fitness_schedule_period % len(self.config.fitness_schedule)]
+                if self.debug_output:
+                    print('Fitness function:', self.fitness_function.__name__)
+            else:
+                raise Exception("Unrecognized fitness schedule")
+            
+        if self.config.min_fitness is not None and self.config.max_fitness is not None:
+            self.fitness_function_normed = lambda x,y: (self.config.fitness_function(x,y) - self.config.min_fitness) / (self.config.max_fitness - self.config.min_fitness)
+        else:
+            self.fitness_function_normed = self.fitness_function # no normalization
 
     def run_one_generation(self):
+        self.update_fitness_function()
+
         if self.show_output:
             self.print_fitnesses()
         # update the autoencoder used for novelty
@@ -110,7 +130,7 @@ class EvolutionaryAlgorithm(object):
                 pbar.set_description_str("Evaluating gen " + str(self.gen) + ": ")
             
             if self.fitness_function.__name__ == "xor" or not self.fitness_function_normed:
-                self.population[i].fitness = self.fitness_function(self.population[i])
+                self.population[i].fitness = self.fitness_function(self.population[i].get_image(), self.target)
             else:
                 self.population[i].fitness = self.fitness_function_normed(self.population[i].get_image(), self.target)
             
@@ -128,9 +148,6 @@ class EvolutionaryAlgorithm(object):
     
     def update_solution_archive(self, solution_archive, genome, max_archive_length, novelty_k):
         # genome should already have novelty score
-        # update existing novelty scores:
-        # for i, archived_solution in enumerate(solution_archive):
-        #     solution_archive[i].novelty = get_novelty(solution_archive, genome, novelty_k)
         solution_archive = sorted(solution_archive, reverse=True, key = lambda s: s.novelty)
 
         if(len(solution_archive) >= max_archive_length):
@@ -142,8 +159,7 @@ class EvolutionaryAlgorithm(object):
         return solution_archive
     
     def record_keeping(self):
-        self.solution = self.population[0]
-        self.this_gen_best = self.solution
+        self.this_gen_best = self.population[0] # still sorted by fitness
         # std_distance, avg_distance, max_diff = calculate_diversity_full(self.population)
         std_distance, avg_distance, max_diff = calculate_diversity_stochastic(self.population)
         n_nodes = get_avg_number_of_hidden_nodes(self.population)
@@ -215,9 +231,9 @@ class EvolutionaryAlgorithm(object):
      
     def print_fitnesses(self):
         div = calculate_diversity_stochastic(self.population)
-        for i in range(len(self.population)):
-            self.population[i].fitness = torch.tensor(self.population[i].fitness,dtype=torch.float32) if type(self.population[i].fitness) !=torch.Tensor else self.population[i].fitness
-            self.population[i].adjusted_fitness = torch.tensor(self.population[i].adjusted_fitness,dtype=torch.float32) if type(self.population[i].adjusted_fitness) != torch.Tensor else self.population[i].adjusted_fitness
+        # for i in range(len(self.population)):
+        #     self.population[i].fitness = torch.tensor(self.population[i].fitness,dtype=torch.float32) if type(self.population[i].fitness) !=torch.Tensor else self.population[i].fitness
+        #     self.population[i].adjusted_fitness = torch.tensor(self.population[i].adjusted_fitness,dtype=torch.float32) if type(self.population[i].adjusted_fitness) != torch.Tensor else self.population[i].adjusted_fitness
        
         print("Generation", self.gen, "="*100)
         print(f" |-Best: {self.get_best().id} ({self.get_best().fitness:.4f})")
@@ -250,7 +266,6 @@ def calculate_diversity_stochastic(population):
     pop = population
     for i in range(int(len(population)/10)):
         i = random.choice(pop)
-        pop.remove(i)
         j = random.choice(pop)
         diffs.append(i.genetic_difference(j))
 

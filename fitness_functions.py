@@ -99,6 +99,7 @@ def psnr(candidate, target):
    assert_images(candidate, target)
    f, r = correct_dims(candidate, target)
    value = piq_psnr(f, r, data_range=1.0, reduction='mean')
+   value = value / 50.0 # max is normally 50 DB
    if value < 0:
       return torch.tensor(0.0)
    return value
@@ -110,3 +111,9 @@ def fsim(candidate, target):
    if value < 0:
       return torch.tensor(0.0)
    return value
+
+def average(candidate, target):
+   f, r = candidate, target
+   # fns = [mse, psnr]
+   fns = [mse, ssim, psnr, fsim, haarpsi]
+   return sum([fn(f,r) for fn in fns]) / len(fns)

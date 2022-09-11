@@ -277,9 +277,9 @@ class CPPN():
         self.species_id = 0
         self.id = CPPN.get_id()
         
-        self.fitness = 0
-        self.novelty = 0
-        self.adjusted_fitness = 0
+        self.fitness = torch.tensor(0.0)
+        self.novelty = torch.tensor(0.0)
+        self.adjusted_fitness = torch.tensor(0.0)
 
         self.n_inputs = 2 # x, y
         if config.use_radial_distance:
@@ -473,7 +473,7 @@ class CPPN():
 
     def mutate(self, rates=None):
         """Mutates the CPPN based on its config or the optionally provided rates."""
-        self.fitness, self.adjusted_fitness, self.novelty = 0, 0, 0 # new fitnesses after mutation
+        self.fitness, self.adjusted_fitness, self.novelty = torch.tensor(0.0), torch.tensor(0.0), torch.tensor(0.0) # new fitnesses after mutation
         
         if rates is None:
             add_node = self.config.prob_add_node

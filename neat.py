@@ -23,25 +23,7 @@ class NEAT(EvolutionaryAlgorithm):
         self.update_fitness_function()
     
    
-    def update_fitness_function(self):
-        """Normalize fitness function if using a normalized fitness function"""
-        if self.config.fitness_schedule is not None:
-            if self.config.fitness_schedule_type == 'alternating':
-                if self.gen==0:
-                    self.fitness_function = self.config.fitness_schedule[0]
-                elif self.gen % self.config.fitness_schedule_period == 0:
-                        self.fitness_function = self.config.fitness_schedule[self.gen // self.config.fitness_schedule_period % len(self.config.fitness_schedule)]
-                if self.debug_output:
-                    print('Fitness function:', self.fitness_function.__name__)
-            else:
-                raise Exception("Unrecognized fitness schedule")
-            
-        if self.config.min_fitness is not None and self.config.max_fitness is not None:
-            self.fitness_function_normed = lambda x,y: (self.config.fitness_function(x,y) - self.config.min_fitness) / (self.config.max_fitness - self.config.min_fitness)
-        else:
-            self.fitness_function_normed = self.fitness_function # no normalization
-
-  
+    
     
     def update_num_species_offspring(self):
         for sp in self.all_species:
@@ -173,7 +155,6 @@ class NEAT(EvolutionaryAlgorithm):
         super().run_one_generation()
 
        
-        self.update_fitness_function()
         #-----------#
         # selection #
         #-----------#
