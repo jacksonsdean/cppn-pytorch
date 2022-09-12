@@ -1,6 +1,11 @@
 from piq.feature_extractors import InceptionV3
 from piq import ssim as piq_ssim, SSIMLoss, GS, FID, psnr as piq_psnr, fsim as piq_fsim
 from piq import haarpsi as hwbpsi
+from piq import ms_ssim as piq_ms_ssim
+from piq.perceptual import DISTS as piq_dists
+from piq.perceptual import LPIPS as piq_lpips
+
+
 
 import torch
 from torchvision.transforms import Resize
@@ -30,9 +35,11 @@ def correct_dims(candidate, target):
       r = r.unsqueeze(0) 
 
    if f.max() > 1:
-      f = f/255
+      f = f/255.0
    if r.max() > 1:
-      r = r/255
+      r = r/255.0
+   f = f.to(torch.float32)
+   r = r.to(torch.float32)
    
    # pad to 32x32 if necessary
    if f.shape[1] < 32 or f.shape[2] < 32:
@@ -55,6 +62,7 @@ def assert_images(*images):
 def empty(candidate, target):
    raise NotImplementedError("Fitness function not implemented")
 
+# Why not use MSE: https://ece.uwaterloo.ca/~z70wang/publications/SPM09.pdf
 def mse(candidate, target):
    assert_images(candidate, target)
    candidate,target = candidate.to(torch.float32), target.to(torch.float32)
@@ -80,6 +88,19 @@ def xor(cppn):
 
 
 
+def dists(candidate, target):
+   if "DISTS_INSTANCE" in globals().keys():
+      dists_instance = globals()["DISTS_INSTANCE"]
+   else:
+      dists_instance = piq_dists()
+      globals()["DISTS_INSTANCE"] = dists_instance
+   assert_images(candidate, target)
+   f, r = correct_dims(candidate, target)
+   value = dists_instance(f, r)
+   if value < 0:
+      return torch.tensor(0.0)
+   return value
+
 def haarpsi(candidate, target):
    assert_images(candidate, target)
    f, r = correct_dims(candidate, target)
@@ -87,6 +108,9 @@ def haarpsi(candidate, target):
    return hwbpsi(f, r)
 
 
+"""The principle philosophy underlying the original SSIM
+approach is that the human visual system is highly adapted to
+extract structural information from visual scenes. (https://ece.uwaterloo.ca/~z70wang/publications/SPM09.pdf pg. 105)"""
 def ssim(candidate, target):
    assert_images(candidate, target)
    f, r = correct_dims(candidate, target)
@@ -114,6 +138,6 @@ def fsim(candidate, target):
 
 def average(candidate, target):
    f, r = candidate, target
-   # fns = [mse, psnr]
+   # fns = [ssim]
    fns = [mse, ssim, psnr, fsim, haarpsi]
    return sum([fn(f,r) for fn in fns]) / len(fns)

@@ -118,7 +118,7 @@ class EvolutionaryAlgorithm(object):
             self.print_fitnesses()
         # update the autoencoder used for novelty
         if self.gen % self.config.autoencoder_frequency == 0:
-            novelty_ae.update_novelty_network(self.population)
+            novelty_ae.update_novelty_network(self.population) # TODO in MAP-Elites, this should be the elites only?
     
     def update_fitnesses_and_novelty(self):
         if self.show_output:

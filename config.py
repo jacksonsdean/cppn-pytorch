@@ -51,7 +51,8 @@ class   Config:
         # self.fitness_function = 'test' # should get all white pixels
         # self.fitness_function = 'xor' # for debugging
         # self.fitness_function = 'mse' # default -mse
-        self.fitness_function = 'average' # all fitness functions are averaged
+        # self.fitness_function = 'average' # all fitness functions are averaged
+        self.fitness_function = 'dists' # Deep Image Structure and Texture Similarity
         # self.fitness_function = 'haarpsi' # perceptual similarity
         self.fitness_schedule_type = "alternating"
         self.fitness_schedule_period = 10
@@ -77,10 +78,10 @@ class   Config:
           probability of adding a connection is 0.05."""
         self.prob_mutate_activation = .5
         self.prob_mutate_weight = .80 # .80 in the original NEAT
-        self.prob_add_connection = .25 # 0.05 in the original NEAT
-        self.prob_add_node = .65 # 0.03 in original NEAT
-        self.prob_remove_node = 0.15
-        self.prob_disable_connection = .015
+        self.prob_add_connection = .5 # 0.05 in the original NEAT
+        self.prob_add_node = .5 # 0.03 in original NEAT
+        self.prob_remove_node = 0.35
+        self.prob_disable_connection = .35
 
         self.max_weight = 3.0
         self.weight_threshold = 0
@@ -116,8 +117,8 @@ class   Config:
             self.num_inputs += 1
             
         # MAP-Elites
-        self.map_elites_resolution = [6,6]
-        self.map_elites_max_values = [15000,30]
+        self.map_elites_resolution = [4,10]
+        self.map_elites_max_values = [4000,30]
         self.map_elites_min_values = [100,9]
             
 

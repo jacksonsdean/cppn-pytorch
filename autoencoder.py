@@ -4,6 +4,7 @@ import torch
 from torch.optim import Adam, Optimizer
 from torch.utils.data import DataLoader
 from image_utils import *
+import torchvision
 from torchvision import transforms
 import gc 
 from pytorch_lightning import LightningModule, Trainer
@@ -13,7 +14,7 @@ import logging
 logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
 
 BATCH_SIZE = 32
-EPOCHS = 100
+EPOCHS = 200
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
 AVAIL_GPUS = min(1, torch.cuda.device_count())
@@ -38,16 +39,16 @@ class AE(LightningModule):
     def setup_novelty(self, input_shape, original_dims):
         super().__init__()
         self.encoder_hidden_layer = nn.Linear(
-            in_features=input_shape, out_features=128
+            in_features=input_shape, out_features=256
         )
         self.encoder_output_layer = nn.Linear(
-            in_features=128, out_features=128
+            in_features=256, out_features=128
         )
         self.decoder_hidden_layer = nn.Linear(
-            in_features=128, out_features=128
+            in_features=128, out_features=256
         )
         self.decoder_output_layer = nn.Linear(
-            in_features=128, out_features=input_shape
+            in_features=256, out_features=input_shape
         )
         # create an optimizer object
         # Adam optimizer with learning rate 1e-3
@@ -97,10 +98,11 @@ class AE(LightningModule):
     
     def eval_image(self, image):
         self.eval()
-        input_shape=len(image.flat)
-        image = np.expand_dims(image.astype(np.float32), axis=0) # convert to batch
-        images_tensor = tensor(image)#.to(device)
-        images_tensor = images_tensor.view(-1, input_shape)
+        input_shape=image.numel()
+        # images_tensor = torch.tensor(image, dtype=torch.float32).to(device)
+        images_tensor = image
+        images_tensor = images_tensor.unsqueeze(0)
+        images_tensor = images_tensor.view(-1, input_shape) # flatten
         images_tensor = self(images_tensor)
         return images_tensor
     
@@ -172,6 +174,21 @@ class AE(LightningModule):
             callbacks=[early_stop_callback],
         )
         trainer.fit(self,  self.train_loader)
+        
+        # record samples:
+        samples = []
+        random_indices =torch.randint(0, len(population), (8,))
+        for i in range(len(random_indices)):
+            img = population[random_indices[i]].get_image()
+            shape = img.shape
+            x = img.flatten().float()
+            output = self(x)
+            output = output.view(shape)
+            samples.append(img.permute(2,0,1))
+            samples.append(output.permute(2,0,1).detach().cpu())
+
+        grid = torchvision.utils.make_grid(torch.stack(samples)/255.0, nrow=4)
+        self.logger.experiment.add_image('autoencoded_images', grid, 0) 
         
         torch.cuda.empty_cache()
         gc.collect()
