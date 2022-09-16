@@ -7,7 +7,7 @@ from typing import Callable
 
 import torch
 
-from cppn_neat.activation_functions import identity
+from cppn_neat.activation_functions import *
 
 try:
     from activation_functions import get_all
@@ -33,15 +33,17 @@ class   Config:
         self.save_w = 512
         self.save_h = 512
         self.color_mode = "RGB"
+        # self.color_mode = "L"
         self.do_crossover = True
         self.crossover_ratio = .75 # from original NEAT
         self.use_dynamic_mutation_rates = True
         self.dynamic_mutation_rate_end_modifier = 0.1
         self.allow_recurrent = False
         self.init_connection_probability = 0.85
-        self.activations = get_all()
+        # self.activations = get_all()
+        self.activations=  [sin, sigmoid, gauss, identity, round_activation, abs_activation, pulse] # innovation engines
         self.seed = random.randint(0, 100000)
-        self.device = "cpu"
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.normalize_outputs = True
         self.genome_type = None
         
@@ -50,9 +52,9 @@ class   Config:
         
         # self.fitness_function = 'test' # should get all white pixels
         # self.fitness_function = 'xor' # for debugging
-        # self.fitness_function = 'mse' # default -mse
+        self.fitness_function = 'mse' #     default -mse
         # self.fitness_function = 'average' # all fitness functions are averaged
-        self.fitness_function = 'dists' # Deep Image Structure and Texture Similarity
+        # self.fitness_function = 'dists' # Deep Image Structure and Texture Similarity
         # self.fitness_function = 'haarpsi' # perceptual similarity
         self.fitness_schedule_type = "alternating"
         self.fitness_schedule_period = 10
@@ -116,10 +118,17 @@ class   Config:
         if self.use_radial_distance:
             self.num_inputs += 1
             
+        # MAP-Elites-Voting
+        # self.map_elites_resolution = [50]
+        # self.map_elites_max_values = []
+        # self.map_elites_min_values = []
+   
         # MAP-Elites
-        self.map_elites_resolution = [4,10]
-        self.map_elites_max_values = [4000,30]
-        self.map_elites_min_values = [100,9]
+        self.map_elites_resolution = [8, 20, 10]
+        self.map_elites_max_values = [.6, 28, 1]
+        self.map_elites_min_values = [0, 8, .9]
+
+        self.map_elites_voting_fns_per_cell = 3
             
 
         self.novelty_archive_len = 20

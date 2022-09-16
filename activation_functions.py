@@ -71,7 +71,7 @@ def cos(x):
 
 def gauss(x):
     """Returns the gaussian of the input."""
-    y = 2*torch.exp(-20.0 * (x) ** 2)-1
+    y = 2*torch.exp(-20.0 * (x) ** 2)-.5
     return y
 
 # def sawtooth(x):

@@ -6,8 +6,9 @@ from typing import Callable
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import trange
-from cppn_neat.cppn import Node
 import torch
+import os
+from cppn_neat.cppn import Node
 from cppn_neat.graph_util import name_to_fn
 from cppn_neat.autoencoder import novelty_ae, initialize_encoders
 from cppn_neat.util import get_avg_number_of_connections, get_avg_number_of_hidden_nodes, get_max_number_of_connections, visualize_network, get_max_number_of_hidden_nodes
@@ -85,13 +86,33 @@ class EvolutionaryAlgorithm(object):
         self.start_time = time.time()
         self.run_number = run_number
         self.show_output = show_output or self.debug_output
-        for i in range(self.config.population_size): # only create parents for initialization (the mu in mu+lambda)
+        for i in range(self.config.population_size): 
             self.population.append(self.genome_type(self.config)) # generate new random individuals as parents
             
         # update novelty encoder   
         initialize_encoders(self.config, self.target)  
         for g in self.population: g.get_image()
-        # novelty_ae.update_novelty_network(self.population)
+        self.update_fitnesses_and_novelty()
+
+        try:
+            # Run algorithm
+            pbar = trange(self.config.num_generations, desc=f"Run {self.run_number}")
+            self.population = sorted(self.population, key=lambda x: x.fitness.item(), reverse=True) # sort by fitness
+            self.solution = self.population[0]
+        
+            for self.gen in pbar:
+                self.run_one_generation()
+                pbar.set_postfix_str(f"f: {self.get_best().fitness:.4f} d:{self.diversity_over_time[self.gen-1]:.4f}")
+            
+        except KeyboardInterrupt:
+            self.on_end()
+            raise KeyboardInterrupt()  
+        
+        self.on_end()
+
+    def on_end(self):
+        self.end_time = time.time()     
+        self.time_elapsed = self.end_time - self.start_time  
 
     def update_fitness_function(self):
         """Normalize fitness function if using a normalized fitness function"""
@@ -116,25 +137,24 @@ class EvolutionaryAlgorithm(object):
 
         if self.show_output:
             self.print_fitnesses()
+            
         # update the autoencoder used for novelty
-        if self.gen % self.config.autoencoder_frequency == 0:
+        if self.config.autoencoder_frequency > 0 and self.gen % self.config.autoencoder_frequency == 0:
             novelty_ae.update_novelty_network(self.population) # TODO in MAP-Elites, this should be the elites only?
-    
+
     def update_fitnesses_and_novelty(self):
         if self.show_output:
             pbar = trange(len(self.population))
         else:
             pbar = range(len(self.population))
+
+        fits = self.fitness_function(torch.stack([g.get_image() for g in self.population]), self.target)
+
         for i in pbar:
             if self.show_output:
                 pbar.set_description_str("Evaluating gen " + str(self.gen) + ": ")
             
-            if self.fitness_function.__name__ == "xor" or not self.fitness_function_normed:
-                self.population[i].fitness = self.fitness_function(self.population[i].get_image(), self.target)
-            else:
-                self.population[i].fitness = self.fitness_function_normed(self.population[i].get_image(), self.target)
-            
-            assert self.population[i].fitness >= 0, f"fitness must be non-negative for now, but got {self.population[i].fitness}"
+            self.population[i].fitness = fits[i]
         
         if self.show_output:
             pbar = trange(len(self.population))
@@ -159,6 +179,7 @@ class EvolutionaryAlgorithm(object):
         return solution_archive
     
     def record_keeping(self):
+        self.population = sorted(self.population, key=lambda x: x.fitness.item(), reverse=True) # sort by fitness
         self.this_gen_best = self.population[0] # still sorted by fitness
         # std_distance, avg_distance, max_diff = calculate_diversity_full(self.population)
         std_distance, avg_distance, max_diff = calculate_diversity_stochastic(self.population)
@@ -175,10 +196,13 @@ class EvolutionaryAlgorithm(object):
             self.solution_fitness = self.solution.fitness
             self.solution_generation = self.gen
             self.best_genome = self.solution
+        
             
                 
         self.fitness_over_time[self.gen:] = self.solution_fitness # record the fitness of the current best over evolutionary time
         self.solutions_over_time.append(copy.deepcopy(self.solution))   
+
+        self.save_best_img(os.path.join(self.config.output_dir, "images", f"current_best_output.png"))
         
     def show_fitness_curve(self):
         plt.plot(self.fitness_over_time, label="Highest fitness")
@@ -221,8 +245,9 @@ class EvolutionaryAlgorithm(object):
         img = self.get_best().get_image().cpu().numpy()
         plt.imsave(fname, img, cmap='gray')
         plt.close()
-        img = self.this_gen_best.get_image().cpu().numpy()
-        plt.imsave(fname.replace(".png","_final.png"), img, cmap='gray')
+        if hasattr(self, "this_gen_best") and self.this_gen_best is not None:
+            img = self.this_gen_best.get_image().cpu().numpy()
+            plt.imsave(fname.replace(".png","_final.png"), img, cmap='gray')
 
     def save_best_network_image(self):
         best = self.get_best()

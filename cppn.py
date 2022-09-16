@@ -823,21 +823,25 @@ class CPPN():
         """Normalize from outputs (any range) to 0 through 255 and convert to ints"""
         assert self.image is not None, "No image to normalize"
         assert self.image.dtype == torch.float32, f"Image is not float32, is {self.image.dtype}"
-        
         # image = 1.0 - torch.abs(self.image)
+        
+
         max_value = torch.max(self.image)
         min_value = torch.min(self.image)
         image_range = max_value - min_value
         self.image -= min_value
         if image_range != 0: # prevent divide by 0
             self.image /= image_range
+
+        # self.image = torch.clamp(self.image, min=0, max=1)
+
             
         if self.config.color_mode == 'HSL':
             # assume output is HSL and convert to RGB
             self.image = hsv2rgb(self.image) # convert to RGB
         
         self.image *= 255
-        self.image = self.image.to(torch.uint8)
+        self.image = self.image.to(torch.uint8).to(self.device)
         
     def genetic_difference(self, other) -> float:
         # only enabled connections, sorted by innovation id

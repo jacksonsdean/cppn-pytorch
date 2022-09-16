@@ -23,8 +23,6 @@ class NEAT(EvolutionaryAlgorithm):
         self.update_fitness_function()
     
    
-    
-    
     def update_num_species_offspring(self):
         for sp in self.all_species:
             sp.members = get_members_of_species(self.population, sp.id)
@@ -140,6 +138,9 @@ class NEAT(EvolutionaryAlgorithm):
             # Run NEAT
             pbar = trange(self.config.num_generations, desc=f"Run {self.run_number}")
             self.update_fitnesses_and_novelty()
+            for g in self.population:
+                assert g.fitness >= 0, f"fitness must be non-negative for now in NEAT, but got {g.fitness}"
+
             self.population = sorted(self.population, key=lambda x: x.fitness, reverse=True) # sort by fitness
             self.solution = self.population[0]
             
@@ -147,13 +148,12 @@ class NEAT(EvolutionaryAlgorithm):
                 self.run_one_generation()
                 pbar.set_postfix_str(f"f: {self.get_best().fitness:.4f} d:{self.diversity_over_time[self.gen-1]:.4f} s:{self.num_species}, t:{self.species_threshold:.3f}")
         except KeyboardInterrupt:
+            self.end_time = time.time()     
+            self.time_elapsed = self.end_time - self.start_time     
             raise KeyboardInterrupt()  
-        self.end_time = time.time()     
-        self.time_elapsed = self.end_time - self.start_time     
 
     def run_one_generation(self):
         super().run_one_generation()
-
        
         #-----------#
         # selection #
@@ -188,8 +188,6 @@ class NEAT(EvolutionaryAlgorithm):
         #----------------#
         # record keeping #
         #----------------#
-        # diversity:
-        # std_distance, avg_distance, max_diff = calculate_diversity(self.population, self.all_species)
         self.record_keeping()
        
     def record_keeping(self):

@@ -1,38 +1,58 @@
 from piq.feature_extractors import InceptionV3
 from piq import ssim as piq_ssim, SSIMLoss, GS, FID, psnr as piq_psnr, fsim as piq_fsim
-from piq import haarpsi as hwbpsi
 from piq import ms_ssim as piq_ms_ssim
 from piq.perceptual import DISTS as piq_dists
 from piq.perceptual import LPIPS as piq_lpips
+from piq import ContentLoss
+import piq
 
-
+from skimage.transform import resize
+import numpy as np
 
 import torch
 from torchvision.transforms import Resize
 
-def correct_dims(candidate, target):
-   f,r = candidate, target
+def correct_dims(candidates, target):
+   f,r = candidates, target
    
-   # change to 3 channels if necessary
-   if len(r.shape) == 2:
-      r = r.unsqueeze(0)
-      r = r.repeat(3,1,1)
-   elif torch.argmin(torch.tensor(r.shape)) != 0:
-      # color images, move channels to front
-      r = r.permute(2,0,1)
-      
    if len(f.shape) == 2:
-      f = f.unsqueeze(0)
-      f = f.repeat(3,1,1)
-   elif torch.argmin(torch.tensor(f.shape)) != 0:
-      # color images, move channels to front
-      f = f.permute(2,0,1)
-   
-   # fake batch
-   if len(f.shape) == 3:
-      f = f.unsqueeze(0)
-   if len(r.shape) == 3:
-      r = r.unsqueeze(0) 
+      # unbatched L
+      f = f.repeat(3, 1, 1) # to RGB
+      f = f.unsqueeze(0) # create batch
+   elif len(f.shape) == 3:
+      # either batched L or unbatched RGB
+      if min(f.shape) == 3:
+         # color images
+         if torch.argmin(torch.tensor(f.shape)) != 0:
+            f = f.permute(2,0,1)
+         f = f.unsqueeze(0) # batch
+      else:
+         # batched L
+         f = torch.tensor([x.repeat(3,1,1)] for x in f)
+   else:
+      # color
+      if f.shape[1] != 3:
+         f = f.permute(0,3,1,2)
+   if r.shape == 2:
+      # unbatched L
+      r = r.repeat(3,1,1) # to RGB
+      r = r.unsqueeze(0) # create batch
+   elif len(r.shape) == 3:
+      # either batched L or unbatched RGB
+      if min(r.shape) == 3:
+         # color images
+         if torch.argmin(torch.tensor(r.shape)) != 0:
+            # move color to front
+            r = r.permute(2,0,1)
+         r = r.unsqueeze(0) # batch
+      else:
+         # batched L
+         r = torch.tensor([x.repeat(3,1,1)] for x in r)
+   else:
+      # color
+      if r.shape[1] != 3:
+         r = r.permute(0,3,1,2)
+
 
    if f.max() > 1:
       f = f/255.0
@@ -42,10 +62,14 @@ def correct_dims(candidate, target):
    r = r.to(torch.float32)
    
    # pad to 32x32 if necessary
-   if f.shape[1] < 32 or f.shape[2] < 32:
+   if f.shape[2] < 32 or f.shape[3] < 32:
       f = Resize((32,32))(f)
-   if r.shape[1] < 32 or r.shape[2] < 32:
+   if r.shape[2] < 32 or r.shape[3] < 32:
       r = Resize((32,32))(r)
+
+   if f.shape[0] !=1 and r.shape[0] == 1:
+      # only one target in batch, repeat for comparison
+      r = torch.stack([r.squeeze() for _ in range(f.shape[0])])
       
    return f,r
 
@@ -63,10 +87,10 @@ def empty(candidate, target):
    raise NotImplementedError("Fitness function not implemented")
 
 # Why not use MSE: https://ece.uwaterloo.ca/~z70wang/publications/SPM09.pdf
-def mse(candidate, target):
-   assert_images(candidate, target)
-   candidate,target = candidate.to(torch.float32), target.to(torch.float32)
-   return (255.0**2-((target-candidate)**2).mean()) / 255.0**2
+def mse(candidates, target):
+   assert_images(candidates, target)
+   candidates,target = candidates.to(torch.float32), target.to(torch.float32)
+   return (65025-((target-candidates)**2).mean(axis=(1,2,3))) / 65025 # 255^2 = 65025
 
 def test(candidate, target):
    return (candidate/255).mean() # should get all white
@@ -86,26 +110,92 @@ def xor(cppn):
    return max(torch.tensor(0,dtype=torch.float32), 100 - torch.sum(torch.stack(fitnesses)))
 
 
-
-
 def dists(candidate, target):
    if "DISTS_INSTANCE" in globals().keys():
       dists_instance = globals()["DISTS_INSTANCE"]
    else:
-      dists_instance = piq_dists()
+      dists_instance = piq_dists(reduction='none')
       globals()["DISTS_INSTANCE"] = dists_instance
    assert_images(candidate, target)
    f, r = correct_dims(candidate, target)
-   value = dists_instance(f, r)
-   if value < 0:
-      return torch.tensor(0.0)
+   loss = dists_instance(f, r)
+   value = torch.tensor([1.0]*len(f)) - loss
    return value
+   
+def lpips(candidate, target):
+   if "LPIPS_INSTANCE" in globals().keys():
+      lpips_instance = globals()["LPIPS_INSTANCE"]
+   else:
+      lpips_instance = piq_lpips(reduction='none')
+      globals()["LPIPS_INSTANCE"] = lpips_instance
+   assert_images(candidate, target)
+   f, r = correct_dims(candidate, target)
+   loss = lpips_instance(f, r)
+   value = torch.tensor([1.0]*len(f)) - loss
+   return value
+
 
 def haarpsi(candidate, target):
    assert_images(candidate, target)
    f, r = correct_dims(candidate, target)
-   # calculate:
-   return hwbpsi(f, r)
+   value = piq.haarpsi(f, r, data_range=1., reduction='none')
+   return value
+
+def dss(candidate, target):
+   assert_images(candidate, target)
+   f, r = correct_dims(candidate, target)
+   value = piq.dss(f, r, data_range=1., reduction='none')
+   return value
+   
+def gmsd(candidate, target):
+   assert_images(candidate, target)
+   f, r = correct_dims(candidate, target)
+   loss = piq.gmsd(f, r, data_range=1., reduction='none')
+   value = 0.35 - loss # usually 0.35 is the max
+   return value
+
+def mdsi(candidate, target):
+   assert_images(candidate, target)
+   f, r = correct_dims(candidate, target)
+   value = piq.mdsi(f, r, data_range=1., reduction='none')
+   return value
+
+def multi_scale_ssim(candidate, target):
+   assert_images(candidate, target)
+   f, r = correct_dims(candidate, target)
+   f = Resize((161,161))(f)
+   r = Resize((161,161))(r)
+   value = piq.multi_scale_ssim(f, r, data_range=1., reduction='none')
+   return value
+
+def style(candidate, target):
+   # Computes distance between Gram matrices of feature maps
+   assert_images(candidate, target)
+   f, r = correct_dims(candidate, target)
+   loss = piq.StyleLoss(feature_extractor="vgg16", layers=("relu3_3",), reduction="none")(f, r)
+   value = 1.0 - loss
+   return value
+
+def content(candidate, target):
+   if "CONTENT_INSTANCE" in globals().keys():
+      content_instance = globals()["CONTENT_INSTANCE"]
+   else:
+      content_instance = piq.ContentLoss(
+        feature_extractor="vgg16", layers=("relu3_3",), reduction='none')
+      globals()["CONTENT_INSTANCE"] = content_instance
+   assert_images(candidate, target)
+   f, r = correct_dims(candidate, target)
+   loss = piq.ContentLoss( feature_extractor="vgg16", layers=("relu3_3",), reduction='none')(f,r)
+   value = 1.0 - loss
+   return value
+
+def pieAPP(candidate, target):
+   assert_images(candidate, target)
+   f, r = correct_dims(candidate, target)
+   f,r = Resize((128,128))(f), Resize((128,128))(r)
+   loss = piq.PieAPP(reduction='none', stride=32)(f, r)
+   value = 1.0 - loss
+   return value
 
 
 """The principle philosophy underlying the original SSIM
@@ -114,30 +204,187 @@ extract structural information from visual scenes. (https://ece.uwaterloo.ca/~z7
 def ssim(candidate, target):
    assert_images(candidate, target)
    f, r = correct_dims(candidate, target)
-   value = piq_ssim(f, r, data_range=1.0, reduction='mean')
-   if value < 0:
-      return torch.tensor(0.0)
+   value = piq_ssim(f, r, data_range=1.0, reduction='none')
    return value
 
 def psnr(candidate, target):
    assert_images(candidate, target)
    f, r = correct_dims(candidate, target)
-   value = piq_psnr(f, r, data_range=1.0, reduction='mean')
+   value = piq_psnr(f, r, data_range=1.0, reduction='none')
    value = value / 50.0 # max is normally 50 DB
-   if value < 0:
-      return torch.tensor(0.0)
+   return value
+
+def vif(candidate, target):
+   assert_images(candidate, target)
+   f, r = correct_dims(candidate, target)
+   f, r = Resize((41,41))(f), Resize((41,41))(r)
+   value = piq.vif_p(f, r, data_range=1.0, reduction='none')
+   return value
+
+def vsi(candidate, target):
+   assert_images(candidate, target)
+   f, r = correct_dims(candidate, target)
+   value = piq.vsi(f, r, data_range=1.0, reduction='none')
+   return value
+
+def srsim(candidate, target):
+   assert_images(candidate, target)
+   f, r = correct_dims(candidate, target)
+   f, r = Resize((161,161))(f), Resize((161,161))(r)
+   value = piq.srsim(f, r, data_range=1.0, reduction='none')
    return value
 
 def fsim(candidate, target):
    assert_images(candidate, target)
    f, r = correct_dims(candidate, target)
-   value = piq_fsim(f, r)
-   if value < 0:
-      return torch.tensor(0.0)
+   value = piq_fsim(f, r, data_range=1.0, reduction='none')
    return value
+
+def dhash_images(imgs, hash_size: int, h=True):
+   """ 
+   Calculate the dhash signature of a given image 
+   Args:
+      image: the image (np array) to calculate the signature for
+      hash_size: hash size to use, signatures will be of length hash_size^2
+   
+   Returns:
+      Image signature as Numpy n-dimensional array
+   """
+   if len(imgs[0].shape) > 2:
+      # color image, convert to greyscale TODO
+      R, G, B = imgs[:,:,:,0], imgs[:,:,:,1], imgs[:,:,:,2]
+      imgs = 0.2989 * R + 0.5870 * G + 0.1140 * B
+   resized = torch.zeros((imgs.shape[0], hash_size + 1, hash_size))
+   for n,i in enumerate(imgs):
+      resized[n,:,:] = torch.tensor(resize(imgs[n,:,:], (hash_size + 1, hash_size), anti_aliasing=True))
+
+   # compute differences between columns
+   if h:
+      diff = resized[:,:, 1:] > resized[:,:, :-1]
+   else:
+      # vertical 
+      diff = resized[:,1:, :] > resized[:,-1:, :]
+   hashed = diff
+   return hashed
+
+
+            
+hash_size = 50 # hash size (10)
+def dhash(candidate, target):
+      """ 
+      Calculate the dhash signature of a given image 
+      Args:
+         image: the image (np array) to calculate the signature for
+         hash_size: hash size to use, signatures will be of length hash_size^2
+      
+      Returns:
+         Image signature as Numpy n-dimensional array
+      """
+
+      assert_images(candidate, target)
+      f,r = correct_dims(candidate, target)
+      f, r = f/255.0, r/255.0
+      hashes0h = dhash_images(r, hash_size, True)
+      hashes1h = dhash_images(f, hash_size, True)
+      hashes0v = dhash_images(r, hash_size, False)
+      hashes1v = dhash_images(f, hash_size, False)
+      # TODO allow this to run on batches
+      diff_h = torch.sum(hashes0h != hashes1h) / hashes0h[0].numel()
+      diff_v = torch.sum(hashes0v != hashes1v) / hashes0v[0].numel()
+      return (1.0 - (diff_v+diff_h) / 2).item()
+
+
+def feature_set(candidate_images, train_image):
+   raise NotImplementedError() # needs to be adjusted for torch/multiple images
+   """To compare two images and calculate fitness, each is de-
+   fined by a feature set that includes the grayscale value at each pixel
+   location (at N1 × N2 pixels) and the gradient between adjacent
+   pixel values. The candidate feature set is then scaled to correspond
+   with the normalized target feature set (Woolley and Stanley, 2011)."""
+   # c = candidate, t = target
+   # d(c,t) = 1 −e^(−α|c−t|)
+   # α=5 (modulation parameter)
+   # error = average(d(c,t))
+   # fitness = 1 − err(C, T)^2
+   
+   h = train_image.shape[0]
+   w = train_image.shape[1]
+
+   # move color to the end(expected by NP)
+   train_image = train_image.permute(1,2,0)
+   candidate_images = candidate_images.permute(1,2,0)
+
+   train_images = train_image.unsqueeze(0) # add "batch" dim
+   candidate_images = candidate_images.unsqueeze(0) # TODO
+   batch_size = candidate_images.shape[0]
+
+   # convert to numpy (TODO NO)
+   train_images = train_images.cpu().numpy() / 255.0
+   candidate_images = candidate_images.cpu().numpy() / 255.0
+
+   alpha = 5
+   if(len(candidate_images[0].shape) < 3):
+      # greyscale
+      [gradient0x, gradient0y] = np.gradient(train_images, axis=(1,2)) # Y axis, X axis
+      [gradient1x, gradient1y] = np.gradient(candidate_images, axis=(1,2))
+      
+      c = np.array([train_images.reshape(1, h*w), gradient0x.reshape(1, h*w ), gradient0y.reshape(1, h*w)])
+      t = np.array([candidate_images.reshape(batch_size, h*w), gradient1x.reshape(batch_size, h*w), gradient1y.reshape(batch_size, h*w)])
+      
+      c = np.transpose(c, (1, 0, 2))# batch dimension first
+      t = np.transpose(t, (1, 0, 2))
+      diffs = c-t
+      diffs = diffs.reshape(batch_size, 3*h*w) # flatten diffs (3 diffs, height, width)
+      D = 1 - np.exp(-alpha * np.abs(diffs))
+      diffs = np.mean(D, axis =1)
+
+   else:
+      [Y0, X0, C0] = np.gradient(train_images, axis=(1, 2, 3)) # gradient over all axes (Y axis, X axis, color axis)
+      [Y1, X1, C1] = np.gradient(candidate_images, axis=(1, 2, 3))
+      flat_dim = h*w*3 # flatten along all dimensions besides batch dim
+      # math_module = np if using_cupy else np # 
+      math_module = np
+      c = math_module.array([train_images.reshape(1, flat_dim), Y0.reshape(1, flat_dim ), X0.reshape(1, flat_dim), C0.reshape(1, flat_dim)])
+      t = math_module.array([candidate_images.reshape(batch_size, flat_dim), Y1.reshape(batch_size, flat_dim), X1.reshape(batch_size, flat_dim), C1.reshape(batch_size, flat_dim)])
+      c = math_module.transpose(c, (1, 0, 2)) # batch dimension first
+      t = math_module.transpose(t, (1, 0, 2)) 
+      
+      diffs = math_module.abs(t-c)
+      
+      diffs = diffs.reshape(batch_size, 4*3*h*w) # flatten diffs (4 diffs, 3 color channels, height, width)
+      D = 1 - math_module.exp(-alpha * math_module.abs(diffs))
+      diffs = math_module.mean(D, axis =1)
+      
+      
+
+   return diffs
+
+
 
 def average(candidate, target):
    f, r = candidate, target
    # fns = [ssim]
-   fns = [mse, ssim, psnr, fsim, haarpsi]
+   fns =   [psnr,
+            mse,
+            lpips,
+            dists,
+            ssim,
+            # style, # out of range
+            fsim,
+            mdsi,
+            haarpsi,
+            dss,
+            vsi,
+            multi_scale_ssim,
+            gmsd,
+            # content # needs testing
+            # pieAPP # needs testing
+            # vif # needs testing
+            # srsim # needs testing
+            # dhash # needs testing
+            # feature_set # needs testing
+            # average # needs testing
+            ]
    return sum([fn(f,r) for fn in fns]) / len(fns)
+
+

@@ -14,9 +14,9 @@ import logging
 logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
 
 BATCH_SIZE = 32
-EPOCHS = 200
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
+EPOCHS = 150
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = "CPU"
 AVAIL_GPUS = min(1, torch.cuda.device_count())
 # AVAIL_GPUS = 0
 
@@ -53,7 +53,7 @@ class AE(LightningModule):
         # create an optimizer object
         # Adam optimizer with learning rate 1e-3
         # self.optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
-        self.configure_optimizers
+        self.configure_optimizers()
         # mean-squared error loss
         self.criterion = nn.MSELoss()
         self.ready = False
@@ -87,7 +87,7 @@ class AE(LightningModule):
             "train_loss": loss,
         }
         status = {
-            # "steps": torch.tensor(self.global_step).to(device),
+            "steps": torch.tensor(self.global_step).to(device),
             # "total_reward": torch.tensor(self.total_reward).to(device),
         }
         return OrderedDict({"loss": loss, "log": log, "progress_bar": status})
@@ -103,6 +103,8 @@ class AE(LightningModule):
         images_tensor = image
         images_tensor = images_tensor.unsqueeze(0)
         images_tensor = images_tensor.view(-1, input_shape) # flatten
+        if images_tensor.max() > 1:
+            images_tensor = images_tensor / 255.0
         images_tensor = self(images_tensor)
         return images_tensor
     
@@ -111,6 +113,8 @@ class AE(LightningModule):
         input_shape=len(images[0].flat)
         images_tensor = tensor(images).float()#.to(device)
         images_tensor = images_tensor.view(-1, input_shape)
+        if images_tensor.max() > 1:
+            images_tensor = images_tensor / 255.0
         output = self(images_tensor)
         return output
     
@@ -142,6 +146,8 @@ class AE(LightningModule):
         input_shape=images[0].numel()
         images_tensor = torch.stack(images)#.to(device)
         images_tensor = images_tensor.view(-1, input_shape).float()
+        if images_tensor.max() > 1:
+            images_tensor = images_tensor / 255.0
         encoded = self(images_tensor) # send through auto-encoder
         error_criterion = nn.MSELoss(reduction='none')
         reconstruction_errors = torch.mean(error_criterion(encoded, images_tensor), dim=1).detach().cpu().numpy() # compute reconstruction loss
@@ -161,7 +167,7 @@ class AE(LightningModule):
         self.train()
         
         self.train_loader = torch.utils.data.DataLoader(
-            [self.np_to_tensor(g.image) for g in population], batch_size=BATCH_SIZE, shuffle=False, num_workers=0
+            [self.np_to_tensor(g.image/255.0) for g in population], batch_size=BATCH_SIZE, shuffle=False, num_workers=0
         )
         early_stop_callback = EarlyStopping(monitor="train_accuracy", min_delta=0.00, patience=3, verbose=False, mode="max")
         
@@ -182,12 +188,14 @@ class AE(LightningModule):
             img = population[random_indices[i]].get_image()
             shape = img.shape
             x = img.flatten().float()
+            if x.max() > 1:
+                x = x / 255.0
             output = self(x)
             output = output.view(shape)
-            samples.append(img.permute(2,0,1))
+            samples.append(img.permute(2,0,1)/255.0)
             samples.append(output.permute(2,0,1).detach().cpu())
 
-        grid = torchvision.utils.make_grid(torch.stack(samples)/255.0, nrow=4)
+        grid = torchvision.utils.make_grid(torch.stack(samples), nrow=4)
         self.logger.experiment.add_image('autoencoded_images', grid, 0) 
         
         torch.cuda.empty_cache()

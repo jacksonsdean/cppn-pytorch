@@ -4,7 +4,7 @@ import random
 import sys
 from typing import Callable
 import torch
-
+from skimage.color import hsv2rgb as sk_hsv2rgb
 import numpy as np
 try:
     import activation_functions as af
@@ -133,6 +133,10 @@ def get_incoming_connections(individual, node):
 
 
 
+def hsv2rgb(hsv):
+    return torch.tensor(sk_hsv2rgb(hsv))
+      
+
 
 # Functions below are modified from other packages
 # This is necessary because AWS Lambda has strict space limits,
@@ -246,89 +250,3 @@ def feed_forward_layers(individual):
     return layers
 
 
-
-
-###############################################################################################
-# Functions below are from the Scikit-image package https://scikit-image.org/docs/stable
-
-# Copyright (C) 2019, the scikit-image team
-# All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are
-# met:
-#
-#  1. Redistributions of source code must retain the above copyright
-#     notice, this list of conditions and the following disclaimer.
-#  2. Redistributions in binary form must reproduce the above copyright
-#     notice, this list of conditions and the following disclaimer in
-#     the documentation and/or other materials provided with the
-#     distribution.
-#  3. Neither the name of skimage nor the names of its contributors may be
-#     used to endorse or promote products derived from this software without
-#     specific prior written permission.
-#
-# THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
-# IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT,
-# INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-# (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
-# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
-# STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
-# IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.
-
-
-def hsv2rgb(hsv):
-    """HSV to RGB color space conversion.
-    Modified  from:
-    https://scikit-image.org/docs/stable/api/skimage.color.html?highlight=hsv2rgb#skimage.color.hsv2rgb
-
-    Parameters
-    ----------
-    hsv : (..., 3) array_like
-        The image in HSV format. Final dimension denotes channels.
-
-    Returns
-    -------
-    out : (..., 3) ndarray
-        The image in RGB format. Same dimensions as input.
-
-    Raises
-    ------
-    ValueError
-        If `hsv` is not at least 2-D with shape (..., 3).
-
-    Notes
-    -----
-    Conversion between RGB and HSV color spaces results in some loss of
-    precision, due to integer arithmetic and rounding [1]_.
-
-    References
-    ----------
-    .. [1] https://en.wikipedia.org/wiki/HSL_and_HSV
-
-    Examples
-    --------
-    >>> img = data.astronaut()
-    >>> img_hsv = rgb2hsv(img)
-    >>> img_rgb = hsv2rgb(img_hsv)
-    """
-    hsv_h, hsv_s, hsv_l = hsv[:, 0:1], hsv[:, 1:2], hsv[:, 2:3]
-    _c = hsv_l * hsv_s
-    _x = _c * (- torch.abs(hsv_h * 6. % 2. - 1) + 1.)
-    _m = hsv_l - _c
-    _o = torch.zeros_like(_c)
-    idx = (hsv_h * 6.).type(torch.uint8)
-    idx = (idx % 6).expand(-1, 3, -1, -1)
-    rgb = torch.empty_like(hsv)
-    rgb[idx == 0] = torch.cat([_c, _x, _o], dim=1)[idx == 0]
-    rgb[idx == 1] = torch.cat([_x, _c, _o], dim=1)[idx == 1]
-    rgb[idx == 2] = torch.cat([_o, _c, _x], dim=1)[idx == 2]
-    rgb[idx == 3] = torch.cat([_o, _x, _c], dim=1)[idx == 3]
-    rgb[idx == 4] = torch.cat([_x, _o, _c], dim=1)[idx == 4]
-    rgb[idx == 5] = torch.cat([_c, _o, _x], dim=1)[idx == 5]
-    rgb += _m
-    return rgb
