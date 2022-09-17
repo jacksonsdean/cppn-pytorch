@@ -942,6 +942,9 @@ class CPPN():
         child.update_node_layers()
         return child
 
+    def clone(self):
+        return copy.deepcopy(self)
+
     def crossover_(self, other_parent):
         """Crossover with another CPPN using the method in Stanley and Miikkulainen (2007)."""
         child = CPPN(self.config) # create child
