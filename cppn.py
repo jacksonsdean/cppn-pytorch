@@ -112,7 +112,7 @@ class Node(Gene):
                 inputs = nodes[cx.key[0]].outputs * cx.weight
                 self.sum_inputs = self.sum_inputs + inputs
         if not isinstance(self.sum_inputs, torch.Tensor):
-            self.sum_inputs = torch.tensor([self.sum_inputs])
+            self.sum_inputs = torch.tensor([self.sum_inputs], device=incoming_connections[0].weight.device)
         
         self.outputs = self.activation(self.sum_inputs)  # apply activation
 
@@ -434,7 +434,7 @@ class CPPN():
 
     def random_weight(self):
         """Returns a random weight between -max_weight and max_weight."""
-        return random_uniform(-self.config.max_weight, self.config.max_weight, self.device)
+        return random_uniform(-self.config.max_weight, self.config.max_weight, self.device).to(self.device)
 
     def enabled_connections(self):
         """Returns a yield of enabled connections."""
@@ -462,8 +462,9 @@ class CPPN():
 
         for _, connection in self.connection_genome.items():
             if random_uniform(0, 1) < prob:
-                connection.weight += random_uniform(-self.config.weight_mutation_max,
-                                               self.config.weight_mutation_max, device=self.device)
+                delta = random_uniform(-self.config.weight_mutation_max,
+                                               self.config.weight_mutation_max, device=self.device).to(self.device)
+                connection.weight += delta
             elif random_uniform(0, 1) < self.config.prob_weight_reinit:
                 connection.weight = self.random_weight()
 
@@ -640,9 +641,9 @@ class CPPN():
         """Sets the input neurons outputs to the input values."""
         if self.config.use_radial_distance:
             # d = sqrt(x^2 + y^2)
-            inputs.append(math.sqrt(inputs[0]**2 + inputs[1]**2))
+            inputs.append(torch.sqrt(inputs[0]**2 + inputs[1]**2))
         if self.config.use_input_bias:
-            inputs.append(1.0)  # bias = 1.0
+            inputs.append(torch.tensor(1.0,device=self.device))  # bias = 1.0
         for inp, node in zip(inputs, self.input_nodes().values()):
             # inputs are first N nodes
             node.sum_inputs = inp
@@ -668,10 +669,10 @@ class CPPN():
         for _, cx in self.connection_genome.items():
             if cx.weight < self.config.weight_threshold and cx.weight >\
                  -self.config.weight_threshold:
-                cx.weight = torch.tensor(0.0)
+                cx.weight = torch.tensor(0.0,device=self.device)
             if not isinstance(cx.weight, torch.Tensor):
-                cx.weight = torch.tensor(cx.weight)
-            cx.weight = torch.clamp(cx.weight, -self.config.max_weight, self.config.max_weight)
+                cx.weight = torch.tensor(cx.weight, device=self.device)
+            cx.weight = torch.clamp(cx.weight, -self.config.max_weight, self.config.max_weight).to(self.device)
             
 
     def reset_activations(self, parallel=True):
@@ -817,7 +818,7 @@ class CPPN():
             self.image = self.image * 255
             self.image = self.image.to(torch.uint8)
 
-        return self.image
+        return self.image.to(self.device)
 
     def normalize_image(self):
         """Normalize from outputs (any range) to 0 through 255 and convert to ints"""
@@ -868,8 +869,9 @@ class CPPN():
         
         if(len(difference_of_matching_weights) == 0):
             difference_of_matching_weights = 0
-        difference_of_matching_weights = np.mean(
-            difference_of_matching_weights)
+        else:
+            difference_of_matching_weights = torch.mean(
+                torch.stack(difference_of_matching_weights)).item()
 
         # Furthermore, the compatibility distance function
         # includes an additional argument that counts how many

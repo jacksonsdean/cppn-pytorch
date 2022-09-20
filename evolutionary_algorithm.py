@@ -185,7 +185,7 @@ class EvolutionaryAlgorithm(object):
         std_distance, avg_distance, max_diff = calculate_diversity_stochastic(self.population)
         n_nodes = get_avg_number_of_hidden_nodes(self.population)
         n_connections = get_avg_number_of_connections(self.population)
-        self.diversity_over_time[self.gen:] = avg_distance
+        self.diversity_over_time[self.gen:] = avg_distance.cpu()
         self.population_over_time[self.gen:] = float(len(self.population))
         self.nodes_over_time[self.gen:] = n_nodes
         self.connections_over_time[self.gen:] = n_connections
@@ -199,7 +199,7 @@ class EvolutionaryAlgorithm(object):
         
             
                 
-        self.fitness_over_time[self.gen:] = self.solution_fitness # record the fitness of the current best over evolutionary time
+        self.fitness_over_time[self.gen:] = self.solution_fitness.item() # record the fitness of the current best over evolutionary time
         self.solutions_over_time.append(copy.deepcopy(self.solution))   
 
         self.save_best_img(os.path.join(self.config.output_dir, "images", f"current_best_output.png"))
@@ -226,7 +226,7 @@ class EvolutionaryAlgorithm(object):
         child.mutate(rates)
     
     def get_best(self):
-        max_fitness_individual = max(self.population, key=lambda x: x.fitness)
+        max_fitness_individual = max(self.population, key=lambda x: x.fitness.item())
         return max_fitness_individual
     
     def print_best(self):
@@ -287,16 +287,16 @@ def calculate_diversity_full(population):
 
 def calculate_diversity_stochastic(population):
     # compare 10% of population
-    diffs = []
+    diffs = torch.zeros(len(population)//10, device=population[0].config.device)
     pop = population
-    for i in range(int(len(population)/10)):
-        i = random.choice(pop)
-        j = random.choice(pop)
-        diffs.append(i.genetic_difference(j))
+    for i in range(int(len(population)//10)):
+        g1 = random.choice(pop)
+        g2 = random.choice(pop)
+        diffs[i] = g1.genetic_difference(g2)
 
-    std_distance = np.std(diffs)
-    avg_distance = np.mean(diffs)
-    max_diff = np.max(diffs)if(len(diffs)>0) else 0
+    std_distance = torch.std(diffs)
+    avg_distance = torch.mean(diffs)
+    max_diff = torch.max(diffs) if(len(diffs)>0) else torch.tensor(0).to(population[0].config.device)
     return std_distance, avg_distance, max_diff
 
 

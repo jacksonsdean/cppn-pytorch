@@ -26,7 +26,7 @@ def tanh(x):
 
 def relu(x):
     """Returns the rectified linear unit of the input."""
-    return torch.tensor(x * (x > 0), dtype=torch.float32)
+    return torch.tensor(x * (x > 0), dtype=torch.float32, device=x.device)
 
 def tanh_sig(x):
     """Returns the sigmoid of the hyperbolic tangent of the input."""

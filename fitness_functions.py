@@ -89,8 +89,11 @@ def empty(candidate, target):
 # Why not use MSE: https://ece.uwaterloo.ca/~z70wang/publications/SPM09.pdf
 def mse(candidates, target):
    assert_images(candidates, target)
-   candidates,target = candidates.to(torch.float32), target.to(torch.float32)
-   return (65025-((target-candidates)**2).mean(axis=(1,2,3))) / 65025 # 255^2 = 65025
+   f, r = correct_dims(candidates, target)
+   candidates,target = f, r
+   loss =  torch.nn.functional.mse_loss(candidates, target, reduction='mean')
+   value = torch.tensor([1.0]*len(candidates)).to(loss) - loss
+   return value
 
 def test(candidate, target):
    return (candidate/255).mean() # should get all white

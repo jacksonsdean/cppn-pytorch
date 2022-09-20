@@ -15,7 +15,7 @@ logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
 
 BATCH_SIZE = 32
 EPOCHS = 150
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # device = "CPU"
 AVAIL_GPUS = min(1, torch.cuda.device_count())
 # AVAIL_GPUS = 0
@@ -144,7 +144,7 @@ class AE(LightningModule):
     
     def eval_images_novelty(self, images):
         input_shape=images[0].numel()
-        images_tensor = torch.stack(images)#.to(device)
+        images_tensor = torch.stack(images).to(self.device)
         images_tensor = images_tensor.view(-1, input_shape).float()
         if images_tensor.max() > 1:
             images_tensor = images_tensor / 255.0
@@ -167,7 +167,7 @@ class AE(LightningModule):
         self.train()
         
         self.train_loader = torch.utils.data.DataLoader(
-            [self.np_to_tensor(g.image/255.0) for g in population], batch_size=BATCH_SIZE, shuffle=False, num_workers=0
+            [self.np_to_tensor(g.image/255.0).to(self.device) for g in population], batch_size=BATCH_SIZE, shuffle=False, num_workers=0
         )
         early_stop_callback = EarlyStopping(monitor="train_accuracy", min_delta=0.00, patience=3, verbose=False, mode="max")
         
@@ -187,12 +187,12 @@ class AE(LightningModule):
         for i in range(len(random_indices)):
             img = population[random_indices[i]].get_image()
             shape = img.shape
-            x = img.flatten().float()
+            x = img.flatten().float().to(self.device)
             if x.max() > 1:
                 x = x / 255.0
             output = self(x)
             output = output.view(shape)
-            samples.append(img.permute(2,0,1)/255.0)
+            samples.append(img.permute(2,0,1).detach().cpu()/255.0)
             samples.append(output.permute(2,0,1).detach().cpu())
 
         grid = torchvision.utils.make_grid(torch.stack(samples), nrow=4)
@@ -219,9 +219,10 @@ class AE(LightningModule):
     def get_ae_novelties(self, population):
         return self.eval_images_novelty([i.image for i in population])
         
-novelty_ae = AE().to(device)
+novelty_ae = AE()
 
 def initialize_encoders(config, target):
+    device = config.device
     if(isinstance(target, str)): # for classification
         input_shape = config.classification_image_size[0] * config.classification_image_size[1] * len(config.color_mode)
         dims = (config.classification_image_size[0], config.classification_image_size[1], len(config.color_mode))

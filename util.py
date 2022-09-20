@@ -101,16 +101,17 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
 
     edge_labels = {}
     for key, cx in connections:
-        if(not visualize_disabled and (not cx.enabled or np.isclose(cx.weight, 0))): continue
-        style = ('-', 'k',  .5+abs(cx.weight)/max_weight) if cx.enabled else ('--', 'grey', .5+ abs(cx.weight)/max_weight)
-        if(cx.enabled and cx.weight<0): style  = ('-', 'r', .5+abs(cx.weight)/max_weight)
+        w = cx.weight.item()
+        if(not visualize_disabled and (not cx.enabled or np.isclose(w, 0))): continue
+        style = ('-', 'k',  .5+abs(w)/max_weight) if cx.enabled else ('--', 'grey', .5+ abs(w)/max_weight)
+        if(cx.enabled and w<0): style  = ('-', 'r', .5+abs(w)/max_weight)
         from_node = nodes[key[0]]
         to_node = nodes[key[1]]
         if from_node in G.nodes and to_node in G.nodes:
-            G.add_edge(from_node, to_node, weight=f"{cx.weight:.4f}", pos=pos, style=style)
+            G.add_edge(from_node, to_node, weight=f"{w:.4f}", pos=pos, style=style)
         else:
             print("Connection not in graph:", from_node.id, "->", to_node.id)
-        edge_labels[(from_node, to_node)] = f"{cx.weight:.3f}"
+        edge_labels[(from_node, to_node)] = f"{w:.3f}"
 
 
     edge_colors = nx.get_edge_attributes(G,'color').values()
