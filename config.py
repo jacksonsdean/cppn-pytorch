@@ -27,7 +27,7 @@ class   Config:
         self.num_generations = 1000
         self.species_target = 3
         self.population_elitism = 1
-        self.within_species_elitism = 1 #TODO NOT SURE IF WORKS can converge too quickly on small populations
+        self.within_species_elitism = 0 # TODO NOT SURE IF WORKS
         self.res_w = 28
         self.res_h = 28
         self.save_w = 512

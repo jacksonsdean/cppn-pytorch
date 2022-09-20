@@ -800,7 +800,7 @@ class CPPN():
                 node.activate(node_inputs, self.node_genome)
 
         # collect outputs from the last layer
-        outputs = torch.stack([node.outputs for node in self.output_nodes().values()])
+        outputs = torch.stack([node.outputs for node in self.output_nodes().values()]).to(self.device)
 
         # reshape the outputs to image shape
         if len(self.config.color_mode)>2:
