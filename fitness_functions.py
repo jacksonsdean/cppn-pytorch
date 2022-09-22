@@ -122,7 +122,7 @@ def dists(candidate, target):
    assert_images(candidate, target)
    f, r = correct_dims(candidate, target)
    loss = dists_instance(f, r)
-   value = torch.tensor([1.0]*len(f)) - loss
+   value = torch.tensor([1.0]*len(f)).to(loss) - loss
    return value
    
 def lpips(candidate, target):
@@ -134,7 +134,7 @@ def lpips(candidate, target):
    assert_images(candidate, target)
    f, r = correct_dims(candidate, target)
    loss = lpips_instance(f, r)
-   value = torch.tensor([1.0]*len(f)) - loss
+   value = torch.tensor([1.0]*len(f)).to(loss) - loss
    return value
 
 
@@ -154,7 +154,7 @@ def gmsd(candidate, target):
    assert_images(candidate, target)
    f, r = correct_dims(candidate, target)
    loss = piq.gmsd(f, r, data_range=1., reduction='none')
-   value = 0.35 - loss # usually 0.35 is the max
+   value = torch.tensor([.35]*len(f)).to(loss) - loss # usually 0.35 is the max
    return value
 
 def mdsi(candidate, target):
@@ -176,7 +176,7 @@ def style(candidate, target):
    assert_images(candidate, target)
    f, r = correct_dims(candidate, target)
    loss = piq.StyleLoss(feature_extractor="vgg16", layers=("relu3_3",), reduction="none")(f, r)
-   value = 1.0 - loss
+   value = -loss
    return value
 
 def content(candidate, target):
@@ -189,7 +189,7 @@ def content(candidate, target):
    assert_images(candidate, target)
    f, r = correct_dims(candidate, target)
    loss = piq.ContentLoss( feature_extractor="vgg16", layers=("relu3_3",), reduction='none')(f,r)
-   value = 1.0 - loss
+   value = torch.tensor([1.0]*len(f)).to(loss) - loss
    return value
 
 def pieAPP(candidate, target):
@@ -197,7 +197,7 @@ def pieAPP(candidate, target):
    f, r = correct_dims(candidate, target)
    f,r = Resize((128,128))(f), Resize((128,128))(r)
    loss = piq.PieAPP(reduction='none', stride=32)(f, r)
-   value = 1.0 - loss
+   value = torch.tensor([1.0]*len(f)).to(loss) - loss
    return value
 
 
