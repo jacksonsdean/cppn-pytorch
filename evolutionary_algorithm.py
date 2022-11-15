@@ -14,9 +14,9 @@ from cppn_neat.autoencoder import novelty_ae, initialize_encoders
 from cppn_neat.util import get_avg_number_of_connections, get_avg_number_of_hidden_nodes, get_max_number_of_connections, visualize_network, get_max_number_of_hidden_nodes
 
 class EvolutionaryAlgorithm(object):
-    def __init__(self, target, config, debug_output=False) -> None:
+    def __init__(self, config, debug_output=False) -> None:
+        torch.autograd.set_grad_enabled(False) # TODO: document and experiment with this
         self.gen = 0
-        self.next_available_id = 0
         self.debug_output = debug_output
         self.config = config
         Node.current_id =  self.config.num_inputs + self.config.num_outputs # reset node id counter
@@ -38,7 +38,7 @@ class EvolutionaryAlgorithm(object):
         self.solution = None
         self.this_gen_best = None
         self.novelty_archive = []
-        
+        self.device = config.device
         self.run_number = 0
         
         self.solution_fitness = -math.inf
@@ -51,7 +51,7 @@ class EvolutionaryAlgorithm(object):
             self.fitness_function = name_to_fn(config.fitness_function)
             self.fitness_function_normed = self.fitness_function
             
-        self.target = target
+        self.target = self.config.target.to(self.device)
     
     def get_mutation_rates(self):
         """Get the mutate rates for the current generation 
@@ -82,6 +82,7 @@ class EvolutionaryAlgorithm(object):
         else:
             return  self.config.prob_mutate_activation, self.config.prob_mutate_weight, self.config.prob_add_connection, self.config.prob_add_node, self.config.prob_remove_node, self.config.prob_disable_connection, self.config.weight_mutation_max, self.config.prob_reenable_connection
 
+    # @torch.no_grad()
     def evolve(self, run_number = 1, show_output=True):
         self.start_time = time.time()
         self.run_number = run_number
@@ -92,13 +93,14 @@ class EvolutionaryAlgorithm(object):
         # update novelty encoder   
         initialize_encoders(self.config, self.target)  
         for g in self.population: g.get_image()
+        # with torch.no_grad():
         self.update_fitnesses_and_novelty()
 
         try:
             # Run algorithm
             pbar = trange(self.config.num_generations, desc=f"Run {self.run_number}")
             self.population = sorted(self.population, key=lambda x: x.fitness.item(), reverse=True) # sort by fitness
-            self.solution = self.population[0]
+            self.solution = self.population[0].clone(cpu=True) 
         
             for self.gen in pbar:
                 self.run_one_generation()
@@ -113,6 +115,8 @@ class EvolutionaryAlgorithm(object):
     def on_end(self):
         self.end_time = time.time()     
         self.time_elapsed = self.end_time - self.start_time  
+        print("Wrapping up, please wait...")
+        print("\t Evolution completed with", self.gen+1, "generations", "in", self.time_elapsed, "seconds")
 
     def update_fitness_function(self):
         """Normalize fitness function if using a normalized fitness function"""
@@ -148,7 +152,7 @@ class EvolutionaryAlgorithm(object):
         else:
             pbar = range(len(self.population))
 
-        fits = self.fitness_function(torch.stack([g.get_image() for g in self.population]), self.target)
+        fits = self.fitness_function(torch.stack([g.get_image() for g in self.population]), self.target).detach() # TODO maybe don't detach and experiment with autograd?
 
         for i in pbar:
             if self.show_output:
@@ -161,7 +165,7 @@ class EvolutionaryAlgorithm(object):
         else:
             pbar = range(len(self.population))
             
-        novelties = novelty_ae.get_ae_novelties(self.population)
+        novelties = novelty_ae.get_ae_novelties(self.population).detach()
         for i, n in enumerate(novelties):
             self.population[i].novelty = n
             self.novelty_archive = self.update_solution_archive(self.novelty_archive, self.population[i], self.config.novelty_archive_len, self.config.novelty_k)
@@ -180,7 +184,7 @@ class EvolutionaryAlgorithm(object):
     
     def record_keeping(self):
         self.population = sorted(self.population, key=lambda x: x.fitness.item(), reverse=True) # sort by fitness
-        self.this_gen_best = self.population[0] # still sorted by fitness
+        self.this_gen_best = self.population[0].clone(cpu=True)  # still sorted by fitness
         # std_distance, avg_distance, max_diff = calculate_diversity_full(self.population)
         std_distance, avg_distance, max_diff = calculate_diversity_stochastic(self.population)
         n_nodes = get_avg_number_of_hidden_nodes(self.population)
@@ -200,7 +204,7 @@ class EvolutionaryAlgorithm(object):
             
                 
         self.fitness_over_time[self.gen:] = self.solution_fitness.item() # record the fitness of the current best over evolutionary time
-        self.solutions_over_time.append(copy.deepcopy(self.solution))   
+        self.solutions_over_time.append(self.solution.clone())   
 
         self.save_best_img(os.path.join(self.config.output_dir, "images", f"current_best_output.png"))
         
@@ -226,6 +230,8 @@ class EvolutionaryAlgorithm(object):
         child.mutate(rates)
     
     def get_best(self):
+        if len(self.population) == 0:
+            return None
         max_fitness_individual = max(self.population, key=lambda x: x.fitness.item())
         return max_fitness_individual
     
@@ -237,22 +243,25 @@ class EvolutionaryAlgorithm(object):
         print()
         self.print_best()
         self.save_best_network_image()
-        img = self.get_best().get_image().cpu().to(np.uint8).numpy()
+        img = self.get_best().get_image().cpu().numpy()
         plt.imshow(img, cmap='gray')
         plt.show()
         
     def save_best_img(self, fname):
-        img = self.get_best().get_image().cpu().numpy()
+        b = self.get_best()
+        if b is None:
+            return
+        img = b.get_image().detach().cpu().numpy()
         plt.imsave(fname, img, cmap='gray')
         plt.close()
         if hasattr(self, "this_gen_best") and self.this_gen_best is not None:
-            img = self.this_gen_best.get_image().cpu().numpy()
+            img = self.this_gen_best.get_image().detach().cpu().numpy()
             plt.imsave(fname.replace(".png","_final.png"), img, cmap='gray')
 
     def save_best_network_image(self):
         best = self.get_best()
         path = f"{self.config.output_dir}/genomes/best_{self.gen}.png"
-        visualize_network(self.get_best(), sample=False, save_name=path, extra_text=f"Run {self.run_number} Generation: " + str(self.gen) + " fit: " + str(best.fitness) + " species: " + str(best.species_id))
+        visualize_network(self.get_best(), sample=False, save_name=path, extra_text=f"Run {self.run_number} Generation: " + str(self.gen) + " fit: " + f"{best.fitness.item():.3f}" + " species: " + str(best.species_id))
      
     def print_fitnesses(self):
         div = calculate_diversity_stochastic(self.population)

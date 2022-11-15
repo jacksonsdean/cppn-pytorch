@@ -12,9 +12,11 @@ import numpy as np
 import torch
 from torchvision.transforms import Resize
 
+def control(candidates, target):
+   return torch.rand(len(candidates), dtype=torch.float32, device=target.device)
+
 def correct_dims(candidates, target):
    f,r = candidates, target
-   
    if len(f.shape) == 2:
       # unbatched L
       f = f.repeat(3, 1, 1) # to RGB
@@ -54,10 +56,6 @@ def correct_dims(candidates, target):
          r = r.permute(0,3,1,2)
 
 
-   if f.max() > 1:
-      f = f/255.0
-   if r.max() > 1:
-      r = r/255.0
    f = f.to(torch.float32)
    r = r.to(torch.float32)
    
@@ -70,16 +68,17 @@ def correct_dims(candidates, target):
    if f.shape[0] !=1 and r.shape[0] == 1:
       # only one target in batch, repeat for comparison
       r = torch.stack([r.squeeze() for _ in range(f.shape[0])])
-      
+
    return f,r
 
 def assert_images(*images):
    for img in images:
       max_val = torch.max(img)
-      assert (max_val > 1 or max_val == 0), "Fitness function expects values in range [0,255]"
-      assert img.dtype == torch.uint8, "Fitness function expects uint8 images"
+      # assert (max_val > 1 or max_val == 0), "Fitness function expects values in range [0,255]"
+      # assert img.dtype == torch.uint8, "Fitness function expects uint8 images"
+      assert img.dtype == torch.float32, "Fitness function expects float32 images"
 
-# NOTE:
+# NOTE (FOR NEAT ONLY):
 # for now these must all return positive values due to the way 
 # NEAT calculates number offspring per species 
 
@@ -87,13 +86,24 @@ def empty(candidate, target):
    raise NotImplementedError("Fitness function not implemented")
 
 # Why not use MSE: https://ece.uwaterloo.ca/~z70wang/publications/SPM09.pdf
-def mse(candidates, target):
+def mse(candidates, target, keep_grad=False):
    assert_images(candidates, target)
    f, r = correct_dims(candidates, target)
-   candidates,target = f, r
-   loss =  torch.nn.functional.mse_loss(candidates, target, reduction='mean')
-   value = torch.tensor([1.0]*len(candidates)).to(loss) - loss
+   if keep_grad:
+      loss = torch.mean((f - r)**2, dim=(1,2,3))
+   else:
+      with torch.no_grad():
+         loss = torch.mean((f - r)**2, dim=(1,2,3))
+
+   value = torch.tensor([1.0]*len(f), requires_grad=keep_grad, device=loss.device, dtype=loss.dtype)
+   value = value - loss
    return value
+
+def MSE_LOSS(candidate, target):
+   assert_images(candidate, target)
+   f, r = correct_dims(candidate, target)
+   return torch.mean((f - r)**2, dim=(1,2,3))
+
 
 def test(candidate, target):
    return (candidate/255).mean() # should get all white
@@ -135,6 +145,8 @@ def lpips(candidate, target):
    f, r = correct_dims(candidate, target)
    loss = lpips_instance(f, r)
    value = torch.tensor([1.0]*len(f)).to(loss) - loss
+   # clamp to > 0
+   value = torch.max(value, torch.tensor(0.0).to(value))
    return value
 
 
@@ -163,7 +175,7 @@ def mdsi(candidate, target):
    value = piq.mdsi(f, r, data_range=1., reduction='none')
    return value
 
-def multi_scale_ssim(candidate, target):
+def msssim(candidate, target):
    assert_images(candidate, target)
    f, r = correct_dims(candidate, target)
    f = Resize((161,161))(f)
@@ -286,7 +298,7 @@ def dhash(candidate, target):
 
       assert_images(candidate, target)
       f,r = correct_dims(candidate, target)
-      f, r = f/255.0, r/255.0
+      # f, r = f/255.0, r/255.0
       hashes0h = dhash_images(r, hash_size, True)
       hashes1h = dhash_images(f, hash_size, True)
       hashes0v = dhash_images(r, hash_size, False)
@@ -382,7 +394,7 @@ def average(candidate, target):
             gmsd,
             # content # needs testing
             # pieAPP # needs testing
-            # vif # needs testing
+            vif # needs testing
             # srsim # needs testing
             # dhash # needs testing
             # feature_set # needs testing

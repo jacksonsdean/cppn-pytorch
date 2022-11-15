@@ -116,7 +116,8 @@ def get_ids_from_individual(individual):
     inputs = list(individual.input_nodes().keys())
     outputs = list(individual.output_nodes().keys())
     connections = [c.key
-                   for c in individual.enabled_connections()]
+                #    for c in individual.enabled_connections()]
+                   for c in individual.connection_genome.values()]
     return inputs, outputs, connections
 
 
@@ -194,7 +195,7 @@ def required_for_output(inputs, outputs, connections):
     From: https://neat-python.readthedocs.io/en/latest/_modules/graphs.html
     """
 
-    required = set(outputs)
+    required = set(outputs) # outputs always required
     s = set(outputs)
     while 1:
         # Find nodes not in S whose output is consumed by a node in s.
@@ -240,13 +241,11 @@ def feed_forward_layers(individual):
         for n in c:
             if n in required and all(a in s for (a, b) in connections if b == n):
                 t.add(n)
-
         if not t:
             break
 
         layers.append(t)
         s = s.union(t)
-
     return layers
 
 

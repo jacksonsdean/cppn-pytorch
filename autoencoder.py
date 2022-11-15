@@ -131,10 +131,12 @@ class AE(LightningModule):
     def eval_image_novelty(self, image):
         input_shape=len(image.flat)
         encoded = self.eval_image(image) # send through auto-encoder
-        image = np.expand_dims(image, axis=0) # convert to batch
-        images_tensor = torch.tensor(image)#.to(device)
+        # image = np.expand_dims(image, axis=0) # convert to batch
+        # images_tensor = torch.tensor(image)#.to(device)
+        image = image.unsqueeze(0)
         images_tensor = images_tensor.view(-1, input_shape)
-        reconstruction_error = self.criterion(encoded, images_tensor).detach().cpu().numpy() # compute reconstruction loss
+        # reconstruction_error = self.criterion(encoded, images_tensor).detach().cpu().numpy() # compute reconstruction loss
+        reconstruction_error = self.criterion(encoded, images_tensor).detach() # compute reconstruction loss
         del(image)
         del(images_tensor)
         del(encoded)
@@ -150,7 +152,9 @@ class AE(LightningModule):
             images_tensor = images_tensor / 255.0
         encoded = self(images_tensor) # send through auto-encoder
         error_criterion = nn.MSELoss(reduction='none')
-        reconstruction_errors = torch.mean(error_criterion(encoded, images_tensor), dim=1).detach().cpu().numpy() # compute reconstruction loss
+        # reconstruction_errors = torch.mean(error_criterion(encoded, images_tensor), dim=1).detach().cpu().numpy() # compute reconstruction loss
+        # reconstruction_errors = torch.mean(error_criterion(encoded, images_tensor), dim=1) # compute reconstruction loss
+        reconstruction_errors = torch.mean(error_criterion(encoded, images_tensor), dim=1).detach() # compute reconstruction loss
         return reconstruction_errors
     
     def eval_image_fitness(self, image):
@@ -167,7 +171,8 @@ class AE(LightningModule):
         self.train()
         
         self.train_loader = torch.utils.data.DataLoader(
-            [self.np_to_tensor(g.image/255.0).to(self.device) for g in population], batch_size=BATCH_SIZE, shuffle=False, num_workers=0
+            # [self.np_to_tensor(g.image/255.0).to(self.device) for g in population], batch_size=BATCH_SIZE, shuffle=False, num_workers=0
+            [self.np_to_tensor(g.image) for g in population], batch_size=BATCH_SIZE, shuffle=False, num_workers=0
         )
         early_stop_callback = EarlyStopping(monitor="train_accuracy", min_delta=0.00, patience=3, verbose=False, mode="max")
         
@@ -182,25 +187,27 @@ class AE(LightningModule):
         trainer.fit(self,  self.train_loader)
         
         # record samples:
-        samples = []
-        random_indices =torch.randint(0, len(population), (8,))
-        for i in range(len(random_indices)):
-            img = population[random_indices[i]].get_image()
-            shape = img.shape
-            x = img.flatten().float().to(self.device)
-            if x.max() > 1:
-                x = x / 255.0
-            output = self(x)
-            output = output.view(shape)
-            samples.append(img.permute(2,0,1).detach().cpu()/255.0)
-            samples.append(output.permute(2,0,1).detach().cpu())
+        if False:
+            samples = []
+            random_indices =torch.randint(0, len(population), (8,))
+            for i in range(len(random_indices)):
+                img = population[random_indices[i]].get_image()
+                shape = img.shape
+                x = img.flatten().float()
+                if x.max() > 1:
+                    x = x / 255.0
+                output = self(x)
+                output = output.view(shape)
+                # samples.append(img.permute(2,0,1).detach().cpu()/255.0)
+                samples.append(img.permute(2,0,1).detach().cpu())
+                samples.append(output.permute(2,0,1).detach().cpu())
 
-        grid = torchvision.utils.make_grid(torch.stack(samples), nrow=4)
-        self.logger.experiment.add_image('autoencoded_images', grid, 0) 
+            grid = torchvision.utils.make_grid(torch.stack(samples), nrow=4)
+            self.logger.experiment.add_image('autoencoded_images', grid, 0) 
         
-        torch.cuda.empty_cache()
-        gc.collect()
-        del(self.train_loader)
+        # torch.cuda.empty_cache()
+        # gc.collect()
+        # del(self.train_loader)
             
         self.ready = True
     

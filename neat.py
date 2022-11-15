@@ -15,8 +15,8 @@ import copy
 import os
 
 class NEAT(EvolutionaryAlgorithm):
-    def __init__(self, target, config, debug_output=False) -> None:
-        super().__init__(target, config, debug_output)
+    def __init__(self, config, debug_output=False) -> None:
+        super().__init__(config, debug_output)
         self.all_species = []
         self.species_threshold = self.config.init_species_threshold
         # normalize fitness function
@@ -24,13 +24,13 @@ class NEAT(EvolutionaryAlgorithm):
     
    
     def update_num_species_offspring(self):
+        if len(self.all_species) == 0: return
         for sp in self.all_species:
             sp.members = get_members_of_species(self.population, sp.id)
             sp.population_count = len(sp.members)
             if(sp.population_count <= 0): continue
             sp.avg_fitness = torch.mean(torch.stack([i.fitness for i in sp.members])).item()
             sp.sum_adj_fitness = torch.sum(torch.stack([i.adjusted_fitness for i in sp.members]))
-        
         # print([sp.sum_adj_fitness for sp in self.all_species])
         # global_adj_fitness = torch.sum(torch.stack([i.adjusted_fitness for i in self.population]))
         # global_adj_fitness = torch.mean(torch.stack([i.adjusted_fitness for i in self.population]))
@@ -131,7 +131,7 @@ class NEAT(EvolutionaryAlgorithm):
         return new_children
 
     def evolve(self, run_number = 1, show_output=True):
-        super().evolve()
+        super().evolve(run_number = 1, show_output=True)
         try:
             if self.config.use_speciation:
                 assign_species(self.all_species, self.population, self.population, self.species_threshold, Species)
@@ -243,65 +243,10 @@ class NEAT(EvolutionaryAlgorithm):
         if self.config.num_generations>1 and self.species_threshold_over_time[self.gen-2]>self.species_threshold:
             thresh_symbol = '▼'
         print(f" |  Count: {num_species} / {self.config.species_target} | threshold: {self.species_threshold:.2f} {thresh_symbol}") 
-        print(f" |  Best species (avg. fitness): {sorted(self.all_species, key=lambda x: x.avg_fitness if x.population_count > 0 else -1000000000, reverse=True)[0].id}")
+        # print(f" |  Best species (avg. fitness): {sorted(self.all_species, key=lambda x: x.avg_fitness if x.population_count > 0 else -1000000000, reverse=True)[0].id}")
         for species in self.all_species:
             if species.population_count > 0:
                 print(f" |    Species {species.id:03d} |> fit: {species.avg_fitness:.4f} | adj: {species.sum_adj_fitness:.4f} | stag: {self.gen-species.last_improvement} | pop: {species.population_count} | offspring: {species.allowed_offspring if species.allowed_offspring > 0 else 'X'}")
-
-
-def classic_selection_and_reproduction(c, population, all_species, generation_num, mutation_rates):
-    new_children = []
-    while len(new_children) < c.population_size:
-        # inheritance
-        parent1 = np.random.choice(population, size=1)[0] # pick 1 random parent
-
-        #crossover
-        if(c.do_crossover):
-            if c.use_speciation:
-                parent2 = np.random.choice(get_members_of_species(population, parent1.species_id), size=1)[0] # note, we are allowing parents to crossover with themselves
-            else:
-                parent2 = np.random.choice(population, size=1)[0]
-            child = parent1.crossover(parent2)
-        else:
-            child = copy.deepcopy(parent1)
-
-        # mutation
-        child.mutate(mutation_rates)
-        
-        new_children.extend([child]) # add children to the new_children list
-
-    return new_children
-
-def truncation_selection(population, c):
-    assert hasattr(c, "truncation_threshold"), "truncation_threshold not set in config"
-    sorted_population = sorted(population, key=lambda individual: individual.fitness, reverse=True) # sort population by fitness (from high to low)
-    # print([i.fitness for i in sorted_population])
-    return sorted_population[:int(len(sorted_population)*c.truncation_threshold)] # truncation
-
-def tournament_selection(population, c, use_adjusted_fitness=False, override_no_elitism=False):
-    new_population = []
-    if(not override_no_elitism): 
-        for i in range(c.population_elitism):
-            new_population.append(population[i]) # keep best genomes (elitism)
-
-    # fitness
-    while len(new_population) < (1-c.novelty_selection_ratio_within_species)*c.population_size:
-        tournament = np.random.choice(population, size = min(c.tournament_size, len(population)), replace=False)
-        if(use_adjusted_fitness):
-            tournament = sorted(tournament, key=lambda genome: genome.adjusted_fitness, reverse=True)
-        else:
-            tournament = sorted(tournament, key=lambda genome: genome.fitness, reverse=True)
-        new_population.extend(tournament[:c.tournament_winners])  
-
-    # novelty
-    if(c.novelty_selection_ratio_within_species > 0):
-        sorted_pop = sorted(population, key=lambda genome: genome.novelty, reverse=True) # sort the full population by each genome's fitness (from highers to lowest)
-        while len(new_population) < c.num_parents:
-            tournament = np.random.choice(sorted_pop, size = min(c.tournament_size, len(sorted_pop)), replace=False)
-            tournament = sorted(tournament, key=lambda genome: genome.novelty, reverse=True)
-            new_population.extend(tournament[:c.tournament_winners])  
-    
-    return new_population  
 
 
 def calculate_diversity(population, all_species):

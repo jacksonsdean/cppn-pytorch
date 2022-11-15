@@ -9,19 +9,12 @@ import random
 
 from scikits import bootstrap
 import warnings
+
+from cppn_neat.cppn import NodeType
+from cppn_neat.graph_util import get_ids_from_individual, required_for_output
 warnings.filterwarnings("ignore") # for bootstrap CI
     
-# def choose_random_function(config):
-#     return random.choice(config.activations)
-
-# def name_to_fn(name):
-#     fns = inspect.getmembers(sys.modules["node_functions"])
-#     fns.extend([("", None)])
-#     def avg_pixel_distance_fitness():
-#             pass
-#     fns.extend([("avg_pixel_distance_fitness", avg_pixel_distance_fitness)])
-#     return fns[[f[0] for f in fns].index(name)][1]
-    
+   
 def visualize_network(individual, sample_point=None, color_mode="L", visualize_disabled=False, layout='multi', sample=False, show_weights=False, use_inp_bias=False, use_radial_distance=True, save_name=None, extra_text=None, curved=False, return_fig=False):
     c = individual.config
     if(sample):
@@ -32,6 +25,10 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
         
     nodes = individual.node_genome
     connections = individual.connection_genome.items()
+
+    if not visualize_disabled:
+        req = required_for_output(*get_ids_from_individual(individual))
+        nodes = {k: v for k, v in nodes.items() if v.id in req or v.type == NodeType.INPUT or v.type == NodeType.OUTPUT}
 
     max_weight = c.max_weight
 
@@ -52,27 +49,37 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
     function_colors["identity"] = colors[0]
 
     fixed_positions={}
-    inputs = individual.input_nodes().values()
-    
-    for i, node in enumerate(inputs):
-        G.add_node(node, color=function_colors[node.activation.__name__], shape='d', layer=(node.layer))
-        if node.type == 0:
-            # node_labels[node] = f"S{i}:\n{node.activation.__name__}\n"+(f"{node.outputs[0]:.3f}" if node.outputs[0]!=None else "")
-            node_labels[node] = f"input{i}"
-            
-        fixed_positions[node] = (-4,((i+1)*2.)/len(inputs))
+    inputs = {k:v for k,v in nodes.items() if v.type==NodeType.INPUT}
+    for i, node in enumerate(inputs.values()):
+        if node.type == NodeType.INPUT:
+            if not visualize_disabled and node.layer == 999:
+                continue
+            G.add_node(node, color=function_colors[node.activation.__name__], shape='d', layer=(node.layer))
+            if node.type == 0:
+                # node_labels[node] = f"S{i}:\n{node.activation.__name__}\n"+(f"{node.outputs[0]:.3f}" if node.outputs[0]!=None else "")
+                # node_labels[node] = f"input{i}"
+                node_labels[node] = f"input{i}\n{node.id}"
+                
+            fixed_positions[node] = (-4,((i+1)*2.)/len(inputs))
 
-    for node in individual.hidden_nodes().values():
-        G.add_node(node, color=function_colors[node.activation.__name__], shape='o', layer=(node.layer))
-        # node_labels[node] = f"{node.id}\n{node.activation.__name__}\n"+(f"{node.outputs:.3f}" if node.outputs!=None else "" )
-        node_labels[node] = f"{node.id}\n{node.activation.__name__}"
+    for node in nodes.values():
+        if node.type == NodeType.HIDDEN:
+            if not visualize_disabled and node.layer == 999:
+                continue
+            G.add_node(node, color=function_colors[node.activation.__name__], shape='o', layer=(node.layer))
+            # node_labels[node] = f"{node.id}\n{node.activation.__name__}\n"+(f"{node.outputs:.3f}" if node.outputs!=None else "" )
+            node_labels[node] = f"{node.id}\n{node.activation.__name__}"
 
-    for i, node in enumerate(individual.output_nodes().values()):
-        title = i
-        G.add_node(node, color=function_colors[node.activation.__name__], shape='s', layer=(node.layer))
-        # node_labels[node] = f"M{title}:\n{node.activation.__name__}\n"+(f"{node.outputs:.3f}")
-        node_labels[node] = f"output{title}:\n{node.activation.__name__}"
-        fixed_positions[node] = (4, ((i+1)*2)/len(individual.output_nodes()))
+    for i, node in enumerate(nodes.values()):
+        if node.type == NodeType.OUTPUT:
+            if not visualize_disabled and node.layer == 999:
+                continue
+            title = i
+            G.add_node(node, color=function_colors[node.activation.__name__], shape='s', layer=(node.layer))
+            # node_labels[node] = f"M{title}:\n{node.activation.__name__}\n"+(f"{node.outputs:.3f}")
+            # node_labels[node] = f"output{title}:\n{node.activation.__name__}"
+            node_labels[node] = f"{node.id}\noutput{title}:\n{node.activation.__name__}"
+            fixed_positions[node] = (4, ((i+1)*2)/len(individual.output_nodes()))
     pos = {}
     # shells = [[node for node in individual.input_nodes()], [node for node in individual.hidden_nodes()], [node for node in individual.output_nodes()]]
     # pos=nx.shell_layout(G, shells, scale=2)
@@ -101,8 +108,12 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
 
     edge_labels = {}
     for key, cx in connections:
+        if key[0] not in nodes.keys() or key[1] not in nodes.keys():
+            continue
         w = cx.weight.item()
-        if(not visualize_disabled and (not cx.enabled or np.isclose(w, 0))): continue
+        if not visualize_disabled and not cx.enabled:
+        # or np.isclose(w, 0))): 
+            continue
         style = ('-', 'k',  .5+abs(w)/max_weight) if cx.enabled else ('--', 'grey', .5+ abs(w)/max_weight)
         if(cx.enabled and w<0): style  = ('-', 'r', .5+abs(w)/max_weight)
         from_node = nodes[key[0]]

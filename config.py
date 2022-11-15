@@ -4,7 +4,7 @@ import json
 import random
 import sys
 from typing import Callable
-
+import imageio as iio
 import torch
 
 from cppn_neat.activation_functions import *
@@ -27,7 +27,7 @@ class   Config:
         self.num_generations = 1000
         self.species_target = 3
         self.population_elitism = 1
-        self.within_species_elitism = 0 # TODO NOT SURE IF WORKS
+        self.within_species_elitism = 1 # TODO NOT SURE IF WORKS
         self.res_w = 28
         self.res_h = 28
         self.save_w = 512
@@ -36,14 +36,15 @@ class   Config:
         # self.color_mode = "L"
         self.do_crossover = True
         self.crossover_ratio = .75 # from original NEAT
-        self.use_dynamic_mutation_rates = True
+        self.use_dynamic_mutation_rates = False
         self.dynamic_mutation_rate_end_modifier = 0.1
         self.allow_recurrent = False
         self.init_connection_probability = 0.85
-        # self.activations = get_all()
-        self.activations=  [sin, sigmoid, gauss, identity, round_activation, abs_activation, pulse] # innovation engines
+        self.activations = get_all()
+        # self.activations=  [sin, sigmoid, gauss, identity, round_activation, abs_activation, pulse] # innovation engines
+        # self.activations =  [sin] # TODO testing
         self.seed = random.randint(0, 100000)
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.normalize_outputs = True
         self.genome_type = None
         
@@ -78,12 +79,12 @@ class   Config:
          probability of adding a connection is 0.04.
         NEAT: probability of adding a node is 0.03 and the
           probability of adding a connection is 0.05."""
-        self.prob_mutate_activation = .5
+        self.prob_mutate_activation = .15
         self.prob_mutate_weight = .80 # .80 in the original NEAT
-        self.prob_add_connection = .5 # 0.05 in the original NEAT
-        self.prob_add_node = .5 # 0.03 in original NEAT
-        self.prob_remove_node = 0.35
-        self.prob_disable_connection = .35
+        self.prob_add_connection = .15 # 0.05 in the original NEAT
+        self.prob_add_node = .15 # 0.03 in original NEAT
+        self.prob_remove_node = 0.05
+        self.prob_disable_connection = .05
 
         self.max_weight = 3.0
         self.weight_threshold = 0
@@ -119,17 +120,15 @@ class   Config:
             self.num_inputs += 1
             
         # MAP-Elites-Voting
-        # self.map_elites_resolution = [50]
-        # self.map_elites_max_values = []
-        # self.map_elites_min_values = []
+        self.map_elites_resolution = [30]
+        self.map_elites_max_values = [.8]
+        self.map_elites_min_values = [.1]
+        self.map_elites_voting_fns_per_cell = 2
    
         # MAP-Elites
-        self.map_elites_resolution = [8, 20, 10]
-        self.map_elites_max_values = [.6, 28, 1]
-        self.map_elites_min_values = [0, 8, .9]
-
-        self.map_elites_voting_fns_per_cell = 3
-            
+        # self.map_elites_resolution = [8, 20, 10]
+        # self.map_elites_max_values = [.6, 28, 1]
+        # self.map_elites_min_values = [0, 8, .9]
 
         self.novelty_archive_len = 20
         self.novelty_k = 5
@@ -153,9 +152,9 @@ class   Config:
 
     def fns_to_strings(self):
         """Converts the activation functions to strings."""
-        if self.genome_type:
+        if self.genome_type and not isinstance(self.genome_type, str):
             self.genome_type = self.genome_type.__name__
-        
+        self.device = str(self.device)
         self.activations= [fn.__name__ if not isinstance(fn, str) else fn for fn in self.activations]
         if isinstance(self.fitness_function, Callable):
             self.fitness_function = self.fitness_function.__name__
@@ -169,7 +168,10 @@ class   Config:
         else:
             self.output_activation = self.output_activation.__name__ if\
                 not isinstance(self.output_activation, str) else self.output_activation
-    
+
+        if hasattr(self, "target_name"):
+            self.target = self.target_name
+
     def strings_to_fns(self):
         """Converts the activation functions to functions."""
         if self.genome_type:
@@ -187,9 +189,10 @@ class   Config:
                 except:
                     continue
                 
-            
+        self.device = torch.device(self.device)
         self.activations = [name_to_fn(name) if isinstance(name, str) else name for name in self.activations ]
-        
+        if isinstance(self.target, str):
+                self.target = torch.tensor(iio.imread(self.target), dtype=torch.float32, device=self.device)
         try:
             self.fitness_function = name_to_fn(self.fitness_function)
         except ValueError:

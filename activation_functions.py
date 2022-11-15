@@ -40,12 +40,12 @@ def pulse(x):
 def hat(x):
     """Returns the hat function of the input."""
     x = 1.0 - torch.abs(x)
-    x = torch.clip(x, 0, 1).to(torch.float32)
+    x = torch.clip(x, 0.0, 1.0)
     return x
 
 def round_activation(x):
     """return round(x)"""
-    return torch.round(x) # arrays
+    return torch.round(x)
 
 def abs_activation(x):
     """Returns the absolute value of the input."""
@@ -57,8 +57,9 @@ def sqr(x):
 
 def elu(x):
     """Returns the exponential linear unit of the input."""
-    return torch.where(x > 0, x, torch.exp(x) - 1)
+    return torch.where(x > 0, x, torch.exp(x) - 1,).to(torch.float32)
 
+@torch.enable_grad()
 def sin(x):
     """Returns the sine of the input."""
     y =  torch.sin(x*math.pi)
