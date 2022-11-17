@@ -14,7 +14,7 @@ import logging
 logging.getLogger("pytorch_lightning").setLevel(logging.ERROR)
 
 BATCH_SIZE = 32
-EPOCHS = 150
+EPOCHS = 1
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # device = "CPU"
 AVAIL_GPUS = min(1, torch.cuda.device_count())
@@ -152,8 +152,6 @@ class AE(LightningModule):
             images_tensor = images_tensor / 255.0
         encoded = self(images_tensor) # send through auto-encoder
         error_criterion = nn.MSELoss(reduction='none')
-        # reconstruction_errors = torch.mean(error_criterion(encoded, images_tensor), dim=1).detach().cpu().numpy() # compute reconstruction loss
-        # reconstruction_errors = torch.mean(error_criterion(encoded, images_tensor), dim=1) # compute reconstruction loss
         reconstruction_errors = torch.mean(error_criterion(encoded, images_tensor), dim=1).detach() # compute reconstruction loss
         return reconstruction_errors
     

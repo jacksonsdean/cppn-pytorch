@@ -6,6 +6,7 @@ from typing import Callable
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import trange
+import pandas as pd
 import torch
 import os
 from cppn_neat.cppn import Node
@@ -22,16 +23,9 @@ class EvolutionaryAlgorithm(object):
         Node.current_id =  self.config.num_inputs + self.config.num_outputs # reset node id counter
         self.show_output = True
         
-        self.diversity_over_time = np.zeros(self.config.num_generations,dtype=float)
-        self.population_over_time = np.zeros(self.config.num_generations,dtype=np.uint8)
-        self.species_over_time = np.zeros(self.config.num_generations,dtype=np.float)
-        self.species_threshold_over_time = np.zeros(self.config.num_generations, dtype=np.float)
-        self.nodes_over_time = np.zeros(self.config.num_generations, dtype=np.float)
-        self.connections_over_time = np.zeros(self.config.num_generations, dtype=np.float)
-        self.fitness_over_time = np.zeros(self.config.num_generations, dtype=np.float)
-        self.species_pops_over_time = []
+        self.results = pd.DataFrame(columns=['condition', 'run', 'gen', 'fitness', 'diversity', 'population', 'avg_num_connections', 'avg_num_hidden_nodes', 'max_num_connections', 'max_num_hidden_nodes', 'time'])
+                
         self.solutions_over_time = []
-        self.species_champs_over_time = []
         self.time_elapsed = 0
         self.solution_generation = -1
         self.population = []
@@ -40,6 +34,7 @@ class EvolutionaryAlgorithm(object):
         self.novelty_archive = []
         self.device = config.device
         self.run_number = 0
+        self.diversity = 0
         
         self.solution_fitness = -math.inf
         self.best_genome = None
@@ -103,8 +98,10 @@ class EvolutionaryAlgorithm(object):
             self.solution = self.population[0].clone(cpu=True) 
         
             for self.gen in pbar:
+                self.generation_start()
                 self.run_one_generation()
-                pbar.set_postfix_str(f"f: {self.get_best().fitness:.4f} d:{self.diversity_over_time[self.gen-1]:.4f}")
+                self.generation_end()
+                pbar.set_postfix_str(f"f: {self.get_best().fitness:.4f} d:{self.diversity:.4f}")
             
         except KeyboardInterrupt:
             self.on_end()
@@ -115,9 +112,19 @@ class EvolutionaryAlgorithm(object):
     def on_end(self):
         self.end_time = time.time()     
         self.time_elapsed = self.end_time - self.start_time  
+        print("\n\nEvolution completed with", self.gen+1, "generations", "in", self.time_elapsed, "seconds")
         print("Wrapping up, please wait...")
-        print("\t Evolution completed with", self.gen+1, "generations", "in", self.time_elapsed, "seconds")
 
+        # save results
+        filename = os.path.join(self.config.output_dir, f"results.pkl")
+        if os.path.exists(filename):
+            with open(filename, 'rb') as f:
+                save_results = pd.read_pickle(f)
+                save_results = save_results.append(self.results, ignore_index=True)
+        else:
+            save_results = self.results
+        save_results.to_pickle(filename)
+        
     def update_fitness_function(self):
         """Normalize fitness function if using a normalized fitness function"""
         if self.config.fitness_schedule is not None:
@@ -136,7 +143,8 @@ class EvolutionaryAlgorithm(object):
         else:
             self.fitness_function_normed = self.fitness_function # no normalization
 
-    def run_one_generation(self):
+    def generation_start(self):
+        """Called at the start of each generation"""
         self.update_fitness_function()
 
         if self.show_output:
@@ -145,6 +153,15 @@ class EvolutionaryAlgorithm(object):
         # update the autoencoder used for novelty
         if self.config.autoencoder_frequency > 0 and self.gen % self.config.autoencoder_frequency == 0:
             novelty_ae.update_novelty_network(self.population) # TODO in MAP-Elites, this should be the elites only?
+
+    # abstract
+    def run_one_generation(self):
+        """Run one generation of the algorithm"""
+        raise NotImplementedError("run_one_generation() not implemented for base class")
+
+    def generation_end(self):
+        """Called at the end of each generation"""
+        self.record_keeping()
 
     def update_fitnesses_and_novelty(self):
         if self.show_output:
@@ -185,14 +202,13 @@ class EvolutionaryAlgorithm(object):
     def record_keeping(self):
         self.population = sorted(self.population, key=lambda x: x.fitness.item(), reverse=True) # sort by fitness
         self.this_gen_best = self.population[0].clone(cpu=True)  # still sorted by fitness
-        # std_distance, avg_distance, max_diff = calculate_diversity_full(self.population)
-        std_distance, avg_distance, max_diff = calculate_diversity_stochastic(self.population)
+        std_distance, avg_distance, max_diff = calculate_diversity_full(self.population)
+        # std_distance, avg_distance, max_diff = calculate_diversity_stochastic(self.population)
+        self.diversity = avg_distance
         n_nodes = get_avg_number_of_hidden_nodes(self.population)
         n_connections = get_avg_number_of_connections(self.population)
-        self.diversity_over_time[self.gen:] = avg_distance.cpu()
-        self.population_over_time[self.gen:] = float(len(self.population))
-        self.nodes_over_time[self.gen:] = n_nodes
-        self.connections_over_time[self.gen:] = n_connections
+        max_connections = get_max_number_of_connections(self.population)
+        max_nodes = get_max_number_of_hidden_nodes(self.population)
 
         # fitness
         if self.population[0].fitness > self.solution_fitness: # if the new parent is the best found so far
@@ -201,29 +217,10 @@ class EvolutionaryAlgorithm(object):
             self.solution_generation = self.gen
             self.best_genome = self.solution
         
-            
-                
-        self.fitness_over_time[self.gen:] = self.solution_fitness.item() # record the fitness of the current best over evolutionary time
-        self.solutions_over_time.append(self.solution.clone())   
-
+        # 'condition', 'run', 'gen', 'fitness', 'diversity', 'population', 'avg_num_connections', 'avg_num_hidden_nodes', 'max_num_connections', 'max_num_hidden_nodes', 'time'
+        self.results.loc[len(self.results.index)] = [self.config.experiment_condition, self.config.run_id, self.gen, self.solution_fitness.item(), avg_distance.item(), float(len(self.population)), n_connections, n_nodes, max_connections, max_nodes, time.time() - self.start_time]
         self.save_best_img(os.path.join(self.config.output_dir, "images", f"current_best_output.png"))
         
-    def show_fitness_curve(self):
-        plt.plot(self.fitness_over_time, label="Highest fitness")
-        plt.title("Fitness over time")
-        plt.ylabel("Fitness")
-        plt.xlabel("Generation")
-        plt.legend()
-        plt.show()
-        
-    def show_diversity_curve(self):
-        plt.plot(self.diversity_over_time, label="Diversity")
-        plt.title("Diversity over time")
-        plt.ylabel("Diversity")
-        plt.xlabel("Generation")
-        plt.legend()
-        plt.show()
-       
     def mutate(self, child):
         rates = self.get_mutation_rates()
         child.fitness, child.adjusted_fitness = 0, 0 # new fitnesses after mutation
@@ -265,10 +262,6 @@ class EvolutionaryAlgorithm(object):
      
     def print_fitnesses(self):
         div = calculate_diversity_stochastic(self.population)
-        # for i in range(len(self.population)):
-        #     self.population[i].fitness = torch.tensor(self.population[i].fitness,dtype=torch.float32) if type(self.population[i].fitness) !=torch.Tensor else self.population[i].fitness
-        #     self.population[i].adjusted_fitness = torch.tensor(self.population[i].adjusted_fitness,dtype=torch.float32) if type(self.population[i].adjusted_fitness) != torch.Tensor else self.population[i].adjusted_fitness
-       
         print("Generation", self.gen, "="*100)
         print(f" |-Best: {self.get_best().id} ({self.get_best().fitness:.4f})")
         print(f" |  Average fitness: {torch.mean(torch.stack([i.fitness for i in self.population])):.7f} | adjusted: {torch.mean(torch.stack([i.adjusted_fitness for i in self.population])):.7f}")

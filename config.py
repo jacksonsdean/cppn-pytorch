@@ -96,6 +96,7 @@ class   Config:
         self.output_activation = None
         
         self.output_dir = None
+        self.experiment_condition = "_default"
 
         # DGNA/SGMA uses 1 or 2 so that patterns in the initial
         # generation would be nontrivial (Stanley, 2007).
