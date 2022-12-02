@@ -106,8 +106,10 @@ class Node(Gene):
         return [('activation', self.activation), ('type', self.type)]
     
     def to_cpu(self):
-        self.sum_inputs = self.sum_inputs.cpu()
-        self.outputs = self.outputs.cpu()
+        if self.sum_inputs is not None:
+            self.sum_inputs = self.sum_inputs.cpu()
+        if self.outputs is not None:
+            self.outputs = self.outputs.cpu()
 
     @torch.no_grad() # TODO: experiment
     # @torch.enable_grad() # TODO: experiment
@@ -222,7 +224,7 @@ class CPPN():
     """A CPPN Object with Nodes and Connections."""
 
     pixel_inputs = torch.zeros((0, 0, 0), dtype=torch.float32) # (res_h, res_w, n_inputs)
-    current_id = 0
+    current_id = 1 # 0 reserved for 'random' parent
     node_indexer = None
     
     
@@ -263,7 +265,7 @@ class CPPN():
         self.species_id = 0
         self.id = CPPN.get_id()
         
-        self.parents = None
+        self.parents = (0, 0)
         self.fitness = torch.tensor(0.0, device=self.device)
         self.novelty = torch.tensor(0.0, device=self.device)
         self.adjusted_fitness = torch.tensor(0.0, device=self.device)
@@ -759,6 +761,10 @@ class CPPN():
             self.config.res_h = override_h
         if override_w is not None:
             self.config.res_w = override_w
+        
+        if self.config.dry_run:
+            self.image = torch.rand((self.config.res_h, self.config.res_w, len(self.config.color_mode)), device=self.device)
+            return self.image
 
         # decide if we need to recalculate the image
         recalculate = False
@@ -987,6 +993,7 @@ class CPPN():
                 # Homologous gene: combine genes from both parents.
                 child.node_genome[key] = node1.crossover(node2)
 
+        child.parents = (parent1.id, parent2.id)
         child.update_node_layers()
         return child
 
@@ -1005,12 +1012,13 @@ class CPPN():
         for key, cx in self.connection_genome.items():
             cx.to_cpu()
         self.fitness = self.fitness.cpu()
-        self.image = self.image.cpu()
+        if self.image is not None:
+            self.image = self.image.cpu()
         self.adjusted_fitness = self.adjusted_fitness.cpu()
         self.novelty = self.novelty.cpu()
 
     @torch.no_grad()
-    def clone(self, deepcopy=True, cpu=False,new_id=False):
+    def clone(self, deepcopy=True, cpu=False, new_id=False):
         """ Create a copy of this genome. """
         id = self.id if (not new_id) else CPPN.get_id()
         if deepcopy:

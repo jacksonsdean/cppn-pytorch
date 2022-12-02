@@ -22,6 +22,7 @@ class   Config:
     def __init__(self) -> None:
         # Initialize to default values
         # These are only used if the frontend client doesn't override them
+        self.dry_run = False
         self.target = None
         self.population_size = 10
         self.num_generations = 1000
