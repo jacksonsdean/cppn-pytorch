@@ -9,6 +9,7 @@ import pandas as pd
 import torch
 import os
 from cppn_neat.cppn import Node
+from cppn_neat.fitness_functions import correct_dims
 from cppn_neat.graph_util import name_to_fn
 from cppn_neat.autoencoder import novelty_ae, initialize_encoders
 from cppn_neat.util import get_avg_number_of_connections, get_avg_number_of_hidden_nodes, get_max_number_of_connections, visualize_network, get_max_number_of_hidden_nodes
@@ -120,6 +121,25 @@ class EvolutionaryAlgorithm(object):
         print("Wrapping up, please wait...")
 
         # save results
+        print("Saving data...")
+        cond_dir = os.path.join(self.config.output_dir, "conditions", self.config.experiment_condition)
+        os.makedirs(cond_dir, exist_ok=True)
+        self.config.run_id =len(os.listdir(cond_dir))
+        self.run_number = self.config.run_id
+        
+        self.results.loc[self.run_number, "run_id"] = self.config.run_id
+        
+        run_dir = os.path.join(cond_dir, f"run_{self.config.run_id:04d}")
+        if os.path.exists(run_dir):
+            print("WARN: run dir already exists, overwriting")
+        else:
+            os.makedirs(run_dir)
+            
+        # save to run dir
+        filename = os.path.join(run_dir, f"results.pkl")
+        self.results.to_pickle(filename)
+        
+        # save to output dir
         filename = os.path.join(self.config.output_dir, f"results.pkl")
         if os.path.exists(filename):
             with open(filename, 'rb') as f:
@@ -173,8 +193,11 @@ class EvolutionaryAlgorithm(object):
         else:
             pbar = range(len(self.population))
 
-        fits = self.fitness_function(torch.stack([g.get_image() for g in self.population]), self.target).detach() # TODO maybe don't detach and experiment with autograd?
-
+        # fits = self.fitness_function(torch.stack([g.get_image() for g in self.population]), self.target).detach() # TODO maybe don't detach and experiment with autograd?
+        imgs = torch.stack([g.get_image() for g in self.population])
+        imgs, target = correct_dims(imgs, self.target)
+        fits = self.fitness_function(imgs, target)
+        
         for i in pbar:
             if self.show_output:
                 pbar.set_description_str("Evaluating gen " + str(self.gen) + ": ")
@@ -260,11 +283,17 @@ class EvolutionaryAlgorithm(object):
         b = self.get_best()
         if b is None:
             return
-        img = b.get_image().detach().cpu().numpy()
+        img = b.get_image()
+        if len(self.config.color_mode)<3:
+            img = img.repeat(1,1,3)
+        img = img.detach().cpu().numpy()
         plt.imsave(fname, img, cmap='gray')
         plt.close()
         if hasattr(self, "this_gen_best") and self.this_gen_best is not None:
-            img = self.this_gen_best.get_image().detach().cpu().numpy()
+            img = self.this_gen_best.get_image()
+            if len(self.config.color_mode)<3:
+                img = img.repeat(1,1,3)
+            img = img.detach().cpu().numpy()
             plt.imsave(fname.replace(".png","_final.png"), img, cmap='gray')
 
     def save_best_network_image(self):

@@ -126,6 +126,7 @@ class   Config:
         self.map_elites_max_values = [.8]
         self.map_elites_min_values = [.1]
         self.map_elites_voting_fns_per_cell = 2
+        self.allow_jumps = True
    
         # MAP-Elites
         # self.map_elites_resolution = [8, 20, 10]

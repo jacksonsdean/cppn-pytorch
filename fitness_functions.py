@@ -30,12 +30,12 @@ def correct_dims(candidates, target):
          f = f.unsqueeze(0) # batch
       else:
          # batched L
-         f = torch.tensor([x.repeat(3,1,1)] for x in f)
+         f = torch.stack([x.repeat(3,1,1) for x in f])
    else:
       # color
       if f.shape[1] != 3:
          f = f.permute(0,3,1,2)
-   if r.shape == 2:
+   if len(r.shape) == 2:
       # unbatched L
       r = r.repeat(3,1,1) # to RGB
       r = r.unsqueeze(0) # create batch
@@ -49,7 +49,7 @@ def correct_dims(candidates, target):
          r = r.unsqueeze(0) # batch
       else:
          # batched L
-         r = torch.tensor([x.repeat(3,1,1)] for x in r)
+         r = torch.stack([x.repeat(3,1,1) for x in r])         
    else:
       # color
       if r.shape[1] != 3:
@@ -71,6 +71,41 @@ def correct_dims(candidates, target):
 
    return f,r
 
+# def correct_dims(candidates, target):
+ # faster but doesn't work
+#    # concatenate tensors along batch dimension
+#    tensor = torch.cat([candidates, target.unsqueeze(0)], dim=0)
+
+#    # unbatch L tensors and convert to RGB
+#    if len(tensor.shape) == 2:
+#       tensor = tensor.repeat(3, 1, 1)
+
+#    # unbatch or permute color tensors
+#    elif len(tensor.shape) == 3:
+#       # unbatched color tensor
+#       if min(tensor.shape) == 3:
+#             if torch.argmin(torch.tensor(tensor.shape)) != 0:
+#                # move color to front
+#                tensor = tensor.permute(2, 0, 1)
+#       else:
+#             # batched L tensor, convert to RGB
+#             tensor = torch.stack([x.repeat(3, 1, 1) for x in tensor])
+
+#    # convert to float32 and pad to 32x32 if necessary
+#    tensor = tensor.to(torch.float32)
+#    if tensor.shape[2] < 32 or tensor.shape[3] < 32:
+#       tensor = Resize(32)(tensor)
+      
+#    # split concatenated tensor back into original tensors
+#    candidates, target = tensor.split(candidates.size(0), dim=0)
+
+#    # ensure both tensors have the same batch size
+#    if candidates.shape[0] != target.shape[0]:
+#       target = target.repeat(candidates.shape[0], 1, 1, 1)
+
+#    return candidates, target
+
+
 def assert_images(*images):
    for img in images:
       max_val = torch.max(img)
@@ -82,31 +117,31 @@ def assert_images(*images):
 # for now these must all return positive values due to the way 
 # NEAT calculates number offspring per species 
 
-def empty(candidate, target):
+def empty(candidates, target):
    raise NotImplementedError("Fitness function not implemented")
 
 # Why not use MSE: https://ece.uwaterloo.ca/~z70wang/publications/SPM09.pdf
 def mse(candidates, target, keep_grad=False):
    assert_images(candidates, target)
-   f, r = correct_dims(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
    if keep_grad:
-      loss = torch.mean((f - r)**2, dim=(1,2,3))
+      loss = torch.mean((candidates - target)**2, dim=(1,2,3))
    else:
       with torch.no_grad():
-         loss = torch.mean((f - r)**2, dim=(1,2,3))
+         loss = torch.mean((candidates - target)**2, dim=(1,2,3))
 
-   value = torch.tensor([1.0]*len(f), requires_grad=keep_grad, device=loss.device, dtype=loss.dtype)
+   value = torch.tensor([1.0]*len(candidates), requires_grad=keep_grad, device=loss.device, dtype=loss.dtype)
    value = value - loss
    return value
 
-def MSE_LOSS(candidate, target):
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   return torch.mean((f - r)**2, dim=(1,2,3))
+def MSE_LOSS(candidates, target):
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   return torch.mean((candidates - target)**2, dim=(1,2,3))
 
 
-def test(candidate, target):
-   return (candidate/255).mean() # should get all white
+def test(candidates, target):
+   return (candidates/255).mean() # should get all white
 
 def xor(cppn):
    inputs = torch.tensor([[0,0],[0,1],[1,0],[1,1]], dtype=torch.float32)
@@ -123,136 +158,136 @@ def xor(cppn):
    return max(torch.tensor(0,dtype=torch.float32), 100 - torch.sum(torch.stack(fitnesses)))
 
 
-def dists(candidate, target):
+def dists(candidates, target):
    if "DISTS_INSTANCE" in globals().keys():
       dists_instance = globals()["DISTS_INSTANCE"]
    else:
       dists_instance = piq_dists(reduction='none')
       globals()["DISTS_INSTANCE"] = dists_instance
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   loss = dists_instance(f, r)
-   value = torch.tensor([1.0]*len(f)).to(loss) - loss
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   loss = dists_instance(candidates, target)
+   value = torch.tensor([1.0]*len(candidates)).to(loss) - loss
    return value
    
-def lpips(candidate, target):
+def lpips(candidates, target):
    if "LPIPS_INSTANCE" in globals().keys():
       lpips_instance = globals()["LPIPS_INSTANCE"]
    else:
       lpips_instance = piq_lpips(reduction='none')
       globals()["LPIPS_INSTANCE"] = lpips_instance
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   loss = lpips_instance(f, r)
-   value = torch.tensor([1.0]*len(f)).to(loss) - loss
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   loss = lpips_instance(candidates, target)
+   value = torch.tensor([1.0]*len(candidates)).to(loss) - loss
    # clamp to > 0
    value = torch.max(value, torch.tensor(0.0).to(value))
    return value
 
 
-def haarpsi(candidate, target):
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   value = piq.haarpsi(f, r, data_range=1., reduction='none')
+def haarpsi(candidates, target):
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   value = piq.haarpsi(candidates, target, data_range=1., reduction='none')
    return value
 
-def dss(candidate, target):
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   value = piq.dss(f, r, data_range=1., reduction='none')
+def dss(candidates, target):
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   value = piq.dss(candidates, target, data_range=1., reduction='none')
    return value
    
-def gmsd(candidate, target):
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   loss = piq.gmsd(f, r, data_range=1., reduction='none')
-   value = torch.tensor([.35]*len(f)).to(loss) - loss # usually 0.35 is the max
+def gmsd(candidates, target):
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   loss = piq.gmsd(candidates, target, data_range=1., reduction='none')
+   value = torch.tensor([.35]*len(candidates)).to(loss) - loss # usually 0.35 is the max
    return value
 
-def mdsi(candidate, target):
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   value = piq.mdsi(f, r, data_range=1., reduction='none')
+def mdsi(candidates, target):
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   value = piq.mdsi(candidates, target, data_range=1., reduction='none')
    return value
 
-def msssim(candidate, target):
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   f = Resize((161,161))(f)
-   r = Resize((161,161))(r)
-   value = piq.multi_scale_ssim(f, r, data_range=1., reduction='none')
+def msssim(candidates, target):
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   candidates = Resize((161,161))(candidates)
+   target = Resize((161,161))(target)
+   value = piq.multi_scale_ssim(candidates, target, data_range=1., reduction='none')
    return value
 
-def style(candidate, target):
+def style(candidates, target):
    # Computes distance between Gram matrices of feature maps
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   loss = piq.StyleLoss(feature_extractor="vgg16", layers=("relu3_3",), reduction="none")(f, r)
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   loss = piq.StyleLoss(feature_extractor="vgg16", layers=("relu3_3",), reduction="none")(candidates, target)
    value = -loss
    return value
 
-def content(candidate, target):
+def content(candidates, target):
    if "CONTENT_INSTANCE" in globals().keys():
       content_instance = globals()["CONTENT_INSTANCE"]
    else:
       content_instance = piq.ContentLoss(
         feature_extractor="vgg16", layers=("relu3_3",), reduction='none')
       globals()["CONTENT_INSTANCE"] = content_instance
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   loss = piq.ContentLoss( feature_extractor="vgg16", layers=("relu3_3",), reduction='none')(f,r)
-   value = torch.tensor([1.0]*len(f)).to(loss) - loss
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   loss = piq.ContentLoss( feature_extractor="vgg16", layers=("relu3_3",), reduction='none')(candidates,target)
+   value = torch.tensor([1.0]*len(candidates)).to(loss) - loss
    return value
 
-def pieAPP(candidate, target):
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   f,r = Resize((128,128))(f), Resize((128,128))(r)
-   loss = piq.PieAPP(reduction='none', stride=32)(f, r)
-   value = torch.tensor([1.0]*len(f)).to(loss) - loss
+def pieAPP(candidates, target):
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   candidates,target = Resize((128,128))(candidates), Resize((128,128))(target)
+   loss = piq.PieAPP(reduction='none', stride=32)(candidates, target)
+   value = torch.tensor([1.0]*len(candidates)).to(loss) - loss
    return value
 
 
 """The principle philosophy underlying the original SSIM
 approach is that the human visual system is highly adapted to
 extract structural information from visual scenes. (https://ece.uwaterloo.ca/~z70wang/publications/SPM09.pdf pg. 105)"""
-def ssim(candidate, target):
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   value = piq_ssim(f, r, data_range=1.0, reduction='none')
+def ssim(candidates, target):
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   value = piq_ssim(candidates, target, data_range=1.0, reduction='none')
    return value
 
-def psnr(candidate, target):
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   value = piq_psnr(f, r, data_range=1.0, reduction='none')
+def psnr(candidates, target):
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   value = piq_psnr(candidates, target, data_range=1.0, reduction='none')
    value = value / 50.0 # max is normally 50 DB
    return value
 
-def vif(candidate, target):
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   f, r = Resize((41,41))(f), Resize((41,41))(r)
-   value = piq.vif_p(f, r, data_range=1.0, reduction='none')
+def vif(candidates, target):
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   candidates, target = Resize((41,41))(candidates), Resize((41,41))(target)
+   value = piq.vif_p(candidates, target, data_range=1.0, reduction='none')
    return value
 
-def vsi(candidate, target):
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   value = piq.vsi(f, r, data_range=1.0, reduction='none')
+def vsi(candidates, target):
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   value = piq.vsi(candidates, target, data_range=1.0, reduction='none')
    return value
 
-def srsim(candidate, target):
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   f, r = Resize((161,161))(f), Resize((161,161))(r)
-   value = piq.srsim(f, r, data_range=1.0, reduction='none')
+def srsim(candidates, target):
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   candidates, target = Resize((161,161))(candidates), Resize((161,161))(target)
+   value = piq.srsim(candidates, target, data_range=1.0, reduction='none')
    return value
 
-def fsim(candidate, target):
-   assert_images(candidate, target)
-   f, r = correct_dims(candidate, target)
-   value = piq_fsim(f, r, data_range=1.0, reduction='none')
+def fsim(candidates, target):
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   value = piq_fsim(candidates, target, data_range=1.0, reduction='none')
    return value
 
 def dhash_images(imgs, hash_size: int, h=True):
@@ -285,7 +320,7 @@ def dhash_images(imgs, hash_size: int, h=True):
 
             
 hash_size = 50 # hash size (10)
-def dhash(candidate, target):
+def dhash(candidates, target):
       """ 
       Calculate the dhash signature of a given image 
       Args:
@@ -295,10 +330,10 @@ def dhash(candidate, target):
       Returns:
          Image signature as Numpy n-dimensional array
       """
-
-      assert_images(candidate, target)
-      f,r = correct_dims(candidate, target)
-      # f, r = f/255.0, r/255.0
+      raise NotImplementedError()
+      assert_images(candidates, target)
+      # f,r = correct_dims(candidates, target)
+      # candidates, target = f/255.0, r/255.0
       hashes0h = dhash_images(r, hash_size, True)
       hashes1h = dhash_images(f, hash_size, True)
       hashes0v = dhash_images(r, hash_size, False)
@@ -376,8 +411,8 @@ def feature_set(candidate_images, train_image):
 
 
 
-def average(candidate, target):
-   f, r = candidate, target
+def average(candidates, target):
+   candidates, target = candidates, target
    # fns = [ssim]
    fns =   [psnr,
             mse,
@@ -400,6 +435,6 @@ def average(candidate, target):
             # feature_set # needs testing
             # average # needs testing
             ]
-   return sum([fn(f,r) for fn in fns]) / len(fns)
+   return sum([fn(candidates,target) for fn in fns]) / len(fns)
 
 
