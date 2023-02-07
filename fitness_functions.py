@@ -209,6 +209,11 @@ def mdsi(candidates, target):
    # candidates, target = correct_dims(candidates, target)
    value = piq.mdsi(candidates, target, data_range=1., reduction='none')
    return value
+def mdsiinverted(candidates, target):
+   assert_images(candidates, target)
+   # candidates, target = correct_dims(candidates, target)
+   value = torch.tensor(1.0)-piq.mdsi(candidates, target, data_range=1., reduction='none')
+   return value
 
 def msssim(candidates, target):
    assert_images(candidates, target)
