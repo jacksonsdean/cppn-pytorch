@@ -124,7 +124,7 @@ class EvolutionaryAlgorithm(object):
         print("Saving data...")
         cond_dir = os.path.join(self.config.output_dir, "conditions", self.config.experiment_condition)
         os.makedirs(cond_dir, exist_ok=True)
-        self.config.run_id =len(os.listdir(cond_dir))
+        self.config.run_id = max([int(f.split('_')[-1]) for f in os.listdir(cond_dir) if os.path.isdir(os.path.join(cond_dir, f))])
         self.run_number = self.config.run_id
         
         self.results.loc[self.run_number, "run_id"] = self.config.run_id

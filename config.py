@@ -7,16 +7,14 @@ from typing import Callable
 import imageio as iio
 import torch
 
-from cppn_neat.activation_functions import *
-
 try:
-    from activation_functions import get_all
+    from activation_functions import *
     from graph_util import name_to_fn
 except ModuleNotFoundError:
-    from cppn_neat.activation_functions import get_all
+    from cppn_neat.activation_functions import *
     from cppn_neat.graph_util import name_to_fn
 
-class   Config:
+class Config:
     """Stores configuration parameters for the CPPN."""
     # pylint: disable=too-many-instance-attributes
     def __init__(self) -> None:
@@ -115,6 +113,7 @@ class   Config:
         self.use_radial_distance = False # bias towards radial symmetry
         
         self.num_inputs = 2
+        self.num_extra_inputs = 0 # e.g. for latent vector
         self.num_outputs = len(self.color_mode)
         if self.use_input_bias:
             self.num_inputs += 1
@@ -136,7 +135,20 @@ class   Config:
         self.novelty_archive_len = 20
         self.novelty_k = 5
         self.autoencoder_frequency = 10
+        
+        self._make_dirty()
+        
+    def __setattr__(self, key, value):
+        self.__dict__[key] = value
+        if key != 'dirty':
+            self._make_dirty()
             
+            
+    def _make_dirty(self):
+        self.dirty = True
+
+    def _not_dirty(self):
+        self.dirty = False
 
         
     def apply_condition(self, key, value):

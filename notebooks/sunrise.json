@@ -1,0 +1,46 @@
+{
+    "id": 195866,
+    "parents": [
+        194729,
+        194729
+    ],
+    "fitness": 0.0,
+    "novelty": 0.0,
+    "node_genome": [
+        "{\"activation\": \"sin\", \"id\": -1, \"type\": 0, \"layer\": 0, \"sum_inputs\": null, \"outputs\": null}",
+        "{\"activation\": \"gauss\", \"id\": -2, \"type\": 0, \"layer\": 0, \"sum_inputs\": null, \"outputs\": null}",
+        "{\"activation\": \"sin\", \"id\": -3, \"type\": 0, \"layer\": 0, \"sum_inputs\": null, \"outputs\": null}",
+        "{\"activation\": \"identity\", \"id\": -4, \"type\": 1, \"layer\": 3, \"sum_inputs\": null, \"outputs\": null}",
+        "{\"activation\": \"sigmoid\", \"id\": -5, \"type\": 1, \"layer\": 2, \"sum_inputs\": null, \"outputs\": null}",
+        "{\"activation\": \"sigmoid\", \"id\": -6, \"type\": 1, \"layer\": 2, \"sum_inputs\": null, \"outputs\": null}",
+        "{\"activation\": \"gauss\", \"id\": 15100, \"type\": 2, \"layer\": 1, \"sum_inputs\": null, \"outputs\": null}",
+        "{\"activation\": \"sin\", \"id\": 15406, \"type\": 2, \"layer\": 1, \"sum_inputs\": null, \"outputs\": null}",
+        "{\"activation\": \"sigmoid\", \"id\": 15442, \"type\": 2, \"layer\": 1, \"sum_inputs\": null, \"outputs\": null}",
+        "{\"activation\": \"cos\", \"id\": 29288, \"type\": 2, \"layer\": 1, \"sum_inputs\": null, \"outputs\": null}"
+    ],
+    "connection_genome": [
+        "{\"key_\": [-1, -4], \"weight\": 3.0, \"enabled\": false, \"is_recurrent\": false}",
+        "{\"key_\": [-1, -5], \"weight\": -3.0, \"enabled\": true, \"is_recurrent\": false}",
+        "{\"key_\": [-1, -6], \"weight\": -2.3119301795959473, \"enabled\": true, \"is_recurrent\": false}",
+        "{\"key_\": [-2, -4], \"weight\": -3.0, \"enabled\": false, \"is_recurrent\": false}",
+        "{\"key_\": [-2, -5], \"weight\": 2.460092544555664, \"enabled\": true, \"is_recurrent\": false}",
+        "{\"key_\": [-2, -6], \"weight\": -1.136523723602295, \"enabled\": false, \"is_recurrent\": false}",
+        "{\"key_\": [-3, -4], \"weight\": -3.0, \"enabled\": true, \"is_recurrent\": false}",
+        "{\"key_\": [-3, -5], \"weight\": 1.1853063106536865, \"enabled\": false, \"is_recurrent\": false}",
+        "{\"key_\": [-3, -6], \"weight\": -3.0, \"enabled\": false, \"is_recurrent\": false}",
+        "{\"key_\": [-1, 15100], \"weight\": 0.7261879444122314, \"enabled\": true, \"is_recurrent\": false}",
+        "{\"key_\": [15100, -4], \"weight\": -0.17679572105407715, \"enabled\": true, \"is_recurrent\": false}",
+        "{\"key_\": [-5, -4], \"weight\": 2.3005237579345703, \"enabled\": true, \"is_recurrent\": false}",
+        "{\"key_\": [-3, 15406], \"weight\": -1.822951078414917, \"enabled\": true, \"is_recurrent\": false}",
+        "{\"key_\": [15406, -5], \"weight\": 3.0, \"enabled\": true, \"is_recurrent\": false}",
+        "{\"key_\": [-6, -4], \"weight\": -2.010871410369873, \"enabled\": true, \"is_recurrent\": false}",
+        "{\"key_\": [-3, 15442], \"weight\": -2.613960027694702, \"enabled\": true, \"is_recurrent\": false}",
+        "{\"key_\": [15442, -5], \"weight\": -2.5088086128234863, \"enabled\": true, \"is_recurrent\": false}",
+        "{\"key_\": [15100, -5], \"weight\": -1.286911964416504, \"enabled\": true, \"is_recurrent\": false}",
+        "{\"key_\": [-2, 15442], \"weight\": 3.0, \"enabled\": true, \"is_recurrent\": false}",
+        "{\"key_\": [-3, 29288], \"weight\": 1.0, \"enabled\": true, \"is_recurrent\": false}",
+        "{\"key_\": [29288, -6], \"weight\": -2.0145463943481445, \"enabled\": true, \"is_recurrent\": false}"
+    ],
+    "selected": false,
+    "config": "{\n    \"activations\": [\n        \"sin\",\n        \"cos\",\n        \"gauss\",\n        \"identity\",\n        \"sigmoid\"\n    ],\n    \"alg\": \"map-elites-voting\",\n    \"allow_input_activation_mutation\": true,\n    \"allow_jumps\": true,\n    \"allow_recurrent\": false,\n    \"animate\": false,\n    \"autoencoder_frequency\": 0,\n    \"color_mode\": \"RGB\",\n    \"crossover_between_species_probability\": 0.001,\n    \"crossover_ratio\": 0.75,\n    \"device\": \"cpu\",\n    \"do_crossover\": false,\n    \"dry_run\": false,\n    \"dynamic_mutation_rate_end_modifier\": 0.1,\n    \"experiment_condition\": \"03-fns-per-cell\",\n    \"fitness_function\": \"mse\",\n    \"fitness_schedule\": null,\n    \"fitness_schedule_period\": 10,\n    \"fitness_schedule_type\": \"alternating\",\n    \"fns\": [\n        \"psnr\",\n        \"gmsd\",\n        \"mse\",\n        \"lpips\",\n        \"dists\",\n        \"ssim\",\n        \"style\",\n        \"fsim\",\n        \"mdsi\",\n        \"haarpsi\",\n        \"vif\",\n        \"dss\",\n        \"vsi\",\n        \"msssim\"\n    ],\n    \"genome_type\": \"CPPN\",\n    \"hidden_nodes_at_start\": 0,\n    \"init_connection_probability\": 0.85,\n    \"init_species_threshold\": 3,\n    \"map_elites_max_values\": [\n        0.8\n    ],\n    \"map_elites_min_values\": [\n        0.1\n    ],\n    \"map_elites_voting_fns_per_cell\": 3,\n    \"max_fitness\": null,\n    \"max_weight\": 3.0,\n    \"min_fitness\": null,\n    \"normalize_outputs\": true,\n    \"novelty_adjusted_fitness_proportion\": 0,\n    \"novelty_archive_len\": 20,\n    \"novelty_k\": 5,\n    \"novelty_selection_ratio_within_species\": 0,\n    \"num_cells\": 100,\n    \"num_generations\": 1000,\n    \"num_inputs\": 3,\n    \"num_outputs\": 3,\n    \"output_activation\": \"\",\n    \"output_dir\": \"/gpfs2/scratch/jsdean/masters/map_elites_voting/results/fns-per-cell-new\",\n    \"population_elitism\": 0,\n    \"population_size\": 100,\n    \"prob_add_connection\": 0.15,\n    \"prob_add_node\": 0.15,\n    \"prob_disable_connection\": 0.05,\n    \"prob_mutate_activation\": 0.15,\n    \"prob_mutate_weight\": 0.8,\n    \"prob_random_restart\": 0.001,\n    \"prob_reenable_connection\": 0.1,\n    \"prob_remove_node\": 0.05,\n    \"prob_weight_reinit\": 0.08000000000000002,\n    \"res_h\": 32,\n    \"res_w\": 30,\n    \"run_id\": 16,\n    \"save_h\": 512,\n    \"save_w\": 512,\n    \"seed\": 75575,\n    \"species_selection_ratio\": 0.8,\n    \"species_stagnation_threshold\": 100,\n    \"species_target\": 3,\n    \"species_threshold_delta\": 0.1,\n    \"target\": \"../../data/sunrise_tiny.png\",\n    \"target_name\": \"../../data/sunrise_tiny.png\",\n    \"tiebreak_novel\": false,\n    \"use_dynamic_mutation_rates\": false,\n    \"use_input_bias\": true,\n    \"use_radial_distance\": false,\n    \"use_speciation\": true,\n    \"weight_mutation_max\": 2,\n    \"weight_threshold\": 0,\n    \"within_species_elitism\": 1,\n    \"workers\": 0\n}"
+}
