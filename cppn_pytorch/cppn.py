@@ -9,12 +9,12 @@ from typing import Callable
 import torch
 
 from functorch.compile import compiled_function, draw_graph, aot_function
-from activation_functions import identity
-from graph_util import name_to_fn, choose_random_function, is_valid_connection
-from graph_util import *
-from graph_util import get_incoming_connections, feed_forward_layers
-from graph_util import hsv2rgb
-from config import Config
+from cppn_pytorch.activation_functions import identity
+from cppn_pytorch.graph_util import name_to_fn, choose_random_function, is_valid_connection
+from cppn_pytorch.graph_util import *
+from cppn_pytorch.graph_util import get_incoming_connections, feed_forward_layers
+from cppn_pytorch.graph_util import hsv2rgb
+from cppn_pytorch.config import Config
 
 def random_uniform(low=0.0, high=1.0, device='cpu', grad=False):
     return torch.rand(1, device=device, requires_grad=grad)[0] * (high - low) + low

@@ -7,8 +7,8 @@ from typing import Callable
 import imageio as iio
 import torch
 
-from activation_functions import *
-from graph_util import name_to_fn
+from cppn_pytorch.activation_functions import *
+from cppn_pytorch.graph_util import name_to_fn
 
 class Config:
     """Stores configuration parameters for the CPPN."""
