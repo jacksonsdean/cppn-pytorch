@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name='cppn_pytorch',
-    version='0.0.2',
+    version='0.0.3',
     author='Jackson Dean',
     author_email='jackson@downbeat.games',
     description='CPPN implementation in PyTorch',
@@ -17,5 +17,5 @@ setuptools.setup(
     },
     license='MIT',
     packages=['cppn_pytorch'],
-    install_requires=['torch', 'numpy', 'matplotlib', 'scipy', 'scikit-image', 'functorch', 'tqdm', 'torchvision', 'piq', 'imageio','scikits-bootstrap', 'networkx'],
+    install_requires=['torch', 'numpy', 'matplotlib', 'scipy', 'scikit-image', 'functorch', 'tqdm', 'torchvision', 'piq', 'imageio','scikits-bootstrap', 'networkx', 'pyparsing'],
 )
