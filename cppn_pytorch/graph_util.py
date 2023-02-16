@@ -32,7 +32,7 @@ def is_valid_connection(nodes, key:tuple, config):
     return True
 
 
-def name_to_fn(name) -> callable:
+def name_to_fn(name):
     """
     Converts a string to a function.
     params:
@@ -50,7 +50,7 @@ def name_to_fn(name) -> callable:
     return fns[[f[0] for f in fns].index(name)][1]
 
 
-def choose_random_function(config) -> callable:
+def choose_random_function(config) -> Callable:
     """Chooses a random activation function from the activation function module."""
     random_fn = random.choice(config.activations)
     return random_fn

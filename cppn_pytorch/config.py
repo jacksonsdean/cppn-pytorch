@@ -132,6 +132,8 @@ class Config:
         self.novelty_k = 5
         self.autoencoder_frequency = 10
         
+        self.target_name = None
+        
         self._make_dirty()
         
     def __setattr__(self, key, value):
@@ -180,7 +182,7 @@ class Config:
             self.output_activation = self.output_activation.__name__ if\
                 not isinstance(self.output_activation, str) else self.output_activation
 
-        if hasattr(self, "target_name"):
+        if self.target_name is not None:
             self.target = self.target_name
 
     def strings_to_fns(self):
@@ -226,6 +228,7 @@ class Config:
     def from_json(self, json_dict):
         """Converts the configuration from a json string."""
         if isinstance(json_dict, dict):
+            json_dict = json.dumps(json_dict)
             json_dict = json.loads(json_dict)
         self.fns_to_strings()
         for key, value in json_dict.items():

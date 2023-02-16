@@ -4,7 +4,8 @@ from enum import IntEnum
 from itertools import count
 import math
 import json
-from typing import Callable
+import os
+from typing import Callable, List
 # import numpy as np
 import torch
 
@@ -17,7 +18,7 @@ from cppn_pytorch.graph_util import hsv2rgb
 from cppn_pytorch.config import Config
 from cppn_pytorch.gene import * 
 
-def random_uniform(low=0.0, high=1.0, device='cpu', grad=False):
+def random_uniform(low=0.0, high=1.0, device=torch.device('cpu'), grad=False):
     return torch.rand(1, device=device, requires_grad=grad)[0] * (high - low) + low
 
 def random_choice(choices, count, replace):
@@ -43,8 +44,8 @@ class CPPN():
         """Initializes the pixel inputs."""
 
         # Pixel coordinates are linear within coord_range
-        x_vals = torch.linspace(coord_range[0], coord_range[1], res_w, device=device)
-        y_vals = torch.linspace(coord_range[0], coord_range[1], res_h, device=device)
+        x_vals = torch.linspace(coord_range[0], coord_range[1], res_w, device=device,dtype=torch.float32)
+        y_vals = torch.linspace(coord_range[0], coord_range[1], res_h, device=device,dtype=torch.float32)
 
         # initialize to 0s
         CPPN.pixel_inputs = torch.zeros((res_h, res_w, n_inputs), dtype=torch.float32, device=device, requires_grad=False)
@@ -55,9 +56,9 @@ class CPPN():
                 this_pixel = [y_vals[y], x_vals[x]] # coordinates
                 if use_radial_dist:
                     # d = sqrt(x^2 + y^2)
-                    this_pixel.append(math.sqrt(y_vals[y]**2 + x_vals[x]**2))
+                    this_pixel.append(torch.tensor(math.sqrt(y_vals[y]**2 + x_vals[x]**2)))
                 if use_bias:
-                    this_pixel.append(1.0) # bias = 1.0
+                    this_pixel.append(torch.tensor(1.0)) # bias = 1.0
                 CPPN.pixel_inputs[y][x] = torch.tensor(this_pixel, dtype=torch.float32, device=device, requires_grad=False)
 
     def __init__(self, config = None, nodes = None, connections = None) -> None:
@@ -82,6 +83,7 @@ class CPPN():
     def reconfig(self, config = None, nodes = None, connections = None):
         if config is not None:
             self.config = config
+        assert self.config is not None
      
         self.device = self.config.device
         torch.manual_seed(self.config.seed)
@@ -134,6 +136,7 @@ class CPPN():
         
     def initialize_node_genome(self):
         """Initializes the node genome."""
+        assert self.config is not None
         total_node_count = self.n_inputs + self.config.num_extra_inputs +\
             self.n_outputs + self.config.hidden_nodes_at_start
         for idx in range(self.n_inputs + self.config.num_extra_inputs):
@@ -184,18 +187,22 @@ class CPPN():
 
     def backwards(self):
         """Backpropagates the error through the network."""
+        raise NotImplementedError
+        assert self.config is not None
         print("-"*100)
         print("Before: ", list(self.connection_genome.values())[0].weight)
         # self.optimizer.zero_grad()
         # loss = -self.fitness
         # torch.autograd.set_detect_anomaly(True)
-        self.loss.backward()
-        self.optimizer.step()
+        # self.loss.backward()
+        # self.optimizer.step()
         self.image = None # new image
         print("After: ", list(self.connection_genome.values())[0].weight)
 
     def initialize_connection_genome(self):
         """Initializes the connection genome."""
+        assert self.config is not None, "Config is None."
+
         output_layer_idx = self.get_output_layer_index()
         for layer_index in range(0, output_layer_idx+1):
             for layer_to_index in range(layer_index, output_layer_idx+1):
@@ -210,6 +217,7 @@ class CPPN():
         
     def serialize(self):
         del CPPN.pixel_inputs
+        assert self.config is not None, "Config is None."
         CPPN.pixel_inputs = None
         if self.image is not None:
             self.image = self.image.cpu().numpy().tolist() if\
@@ -218,9 +226,11 @@ class CPPN():
             node.serialize()
         for _, connection in self.connection_genome.items():
             connection.serialize()
+
         self.config.serialize()
 
     def deserialize(self):
+        assert self.config is not None, "Config is None."
         for _, node in self.node_genome.items():
             node.deserialize()
         for _, connection in self.connection_genome.items():
@@ -229,6 +239,8 @@ class CPPN():
         
     def to_json(self):
         """Converts the CPPN to a json dict."""
+        assert self.config is not None, "Config is None."
+
         self.serialize()
         img = json.dumps(self.image) if self.image is not None else None
         # make copies to keep the CPPN intact
@@ -279,6 +291,7 @@ class CPPN():
         #     cx.to_node = find_node_with_id(self.node_genome, cx.to_node.id)
 
         self.update_node_layers()
+        assert self.config is not None, "Config is None."
         CPPN.initialize_inputs(self.config.res_h, self.config.res_w,
                 self.config.use_radial_distance,
                 self.config.use_input_bias,
@@ -300,6 +313,8 @@ class CPPN():
 
     def random_weight(self):
         """Returns a random weight between -max_weight and max_weight."""
+        assert self.config is not None, "Config is None."
+        assert isinstance(self.device, torch.device), "Device is not a torch.device."
         # return random_uniform(-self.config.max_weight, self.config.max_weight, self.device, grad=True)
         return random_uniform(-self.config.max_weight, self.config.max_weight, self.device, grad=False)
 
@@ -311,6 +326,8 @@ class CPPN():
 
     def mutate_activations(self, prob):
         """Mutates the activation functions of the nodes."""
+        assert self.config is not None, "Config is None."
+
         eligible_nodes = list(self.hidden_nodes().values())
         if self.config.output_activation is None:
             eligible_nodes.extend(self.output_nodes().values())
@@ -326,6 +343,8 @@ class CPPN():
         Each connection weight is perturbed with a fixed probability by
         adding a floating point number chosen from a uniform distribution of
         positive and negative values """
+        assert self.config is not None, "Config is None."
+        assert isinstance(self.device, torch.device), "Device is not a torch.device."
 
         for _, connection in self.connection_genome.items():
             if random_uniform(0, 1) < prob:
@@ -342,7 +361,7 @@ class CPPN():
     def mutate(self, rates=None):
         """Mutates the CPPN based on its config or the optionally provided rates."""
         self.fitness, self.adjusted_fitness, self.novelty = torch.tensor(0.0,device=self.device), torch.tensor(0.0,device=self.device), torch.tensor(0.0,device=self.device) # new fitnesses after mutation
-        
+        assert self.config is not None, "Config is None."
         if rates is None:
             add_node = self.config.prob_add_node
             add_connection = self.config.prob_add_connection
@@ -380,6 +399,8 @@ class CPPN():
 
     def add_connection(self):
         """Adds a connection to the CPPN."""
+        assert self.config is not None, "Config is None."
+        
         for _ in range(20):  # try 20 times max
             [from_node, to_node] = random_choice(
                 list(self.node_genome.values()), 2, replace=False)
@@ -484,7 +505,7 @@ class CPPN():
         cx.enabled = False
         self.image = None # reset the image
 
-    def update_node_layers(self) -> int:
+    def update_node_layers(self):
         """Update the node layers."""
         layers = feed_forward_layers(self)
         for _, node in self.input_nodes().items():
@@ -508,6 +529,7 @@ class CPPN():
 
     def set_inputs(self, inputs):
         """Sets the input neurons outputs to the input values."""
+        assert self.config is not None, "Config is None."
         if self.config.use_radial_distance:
             # d = sqrt(x^2 + y^2)
             inputs.append(torch.sqrt(inputs[0]**2 + inputs[1]**2))
@@ -521,7 +543,7 @@ class CPPN():
             node.sum_inputs = inp
             node.outputs = node.activation(inp)
 
-    def get_layer(self, layer_index) -> list:
+    def get_layer(self, layer_index):
         """Returns a list of nodes in the given layer."""
         for _, node in self.node_genome.items():
             if node.layer == layer_index:
@@ -538,6 +560,8 @@ class CPPN():
 
     def clamp_weights(self):
         """Clamps all weights to the range [-max_weight, max_weight]."""
+        assert self.config is not None, "Config is None."
+        
         for _, cx in self.connection_genome.items():
             if cx.weight < self.config.weight_threshold and cx.weight >\
                  -self.config.weight_threshold:
@@ -549,6 +573,8 @@ class CPPN():
 
     def reset_activations(self, parallel=True):
         """Resets all node activations to zero."""
+        assert self.config is not None, "Config is None."
+
         if parallel:
             for _, node in self.node_genome.items():
                 node.sum_inputs = torch.ones((self.config.res_h, self.config.res_w), device=self.device)/2.0
@@ -571,6 +597,7 @@ class CPPN():
 
     def feed_forward(self):
         """Feeds forward the network."""
+        assert self.config is not None, "Config is None."
         layers = feed_forward_layers(self) # get layers
         layers.insert(0, self.input_nodes().keys()) # add input nodes as first layer
         for layer in layers:
@@ -599,6 +626,8 @@ class CPPN():
         """Returns an image of the network.
             Extra inputs are (batch_size, num_extra_inputs)
         """
+        assert self.config is not None, "Config is None."
+        
         # apply size override
         if self.config.dirty:
             raise RuntimeError("config is dirty, did you forget to call .reconfig after changing config?")
@@ -628,6 +657,7 @@ class CPPN():
 
         if not recalculate:
             # return the cached image
+            assert self.image is not None
             assert self.image.device == self.device, f"Image is on {self.image.device}, should be {self.device}"
             assert self.image.dtype == torch.float32, f"Image is {self.image.dtype}, should be float32"
             return self.image
@@ -647,24 +677,31 @@ class CPPN():
         """Evaluate the network to get image data by processing each pixel
         serially. Much slower than the parallel method, but required if the
         network has recurrent connections."""
+        assert self.config is not None, "Config is None."
         res_h, res_w = self.config.res_h, self.config.res_w
-        pixels = []
+        pixels: List[torch.Tensor] = []
+        
         for x in torch.linspace(-.5, .5, res_w, dtype=torch.float32, device=self.device):
             for y in torch.linspace(-.5, .5, res_h,dtype=torch.float32, device=self.device):
+                # slow
                 outputs = self.eval([x, y])
                 pixels.extend(outputs)
+                
+        pixels_tensor = torch.stack(pixels)
         if len(self.config.color_mode)>2:
-            pixels = torch.reshape(pixels, (res_w, res_h, self.n_outputs))
+            pixels_tensor = torch.reshape(pixels_tensor, (res_w, res_h, self.n_outputs))
         else:
-            pixels = torch.reshape(pixels, (res_w, res_h))
+            pixels_tensor = torch.reshape(pixels_tensor, (res_w, res_h))
 
-        self.image = pixels
-        return pixels
+        self.image = pixels_tensor
+        return self.image
 
     def get_image_data_parallel(self, extra_inputs=None):
         """Evaluate the network to get image data in parallel
             Extra inputs are (batch_size, num_extra_inputs)
         """
+        assert self.config is not None, "Config is None."
+        
         batch_size = 1 if extra_inputs is None else extra_inputs.shape[0]
         res_h, res_w = self.config.res_h, self.config.res_w
         
@@ -678,7 +715,9 @@ class CPPN():
                 self.config.use_input_bias,
                 self.config.num_inputs,
                 self.device)
-            
+        
+        assert CPPN.pixel_inputs is not None
+        
         if extra_inputs is not None:
             if len(extra_inputs.shape) == 1:
                 raise RuntimeError("Extra inputs must be (batch_size, num_extra_inputs)")
@@ -769,9 +808,9 @@ class CPPN():
         assert self.image is not None, "No image to normalize"
         assert self.image.dtype == torch.float32, f"Image is not float32, is {self.image.dtype}"
         assert str(self.image.device) == str(self.device), f"Image is on {self.image.device}, should be {self.device}"
+        assert self.config is not None, "Config is None."
         
         # image = 1.0 - torch.abs(self.image)
-        
 
         max_value = torch.max(self.image)
         min_value = torch.min(self.image)

@@ -11,12 +11,8 @@ from scikits import bootstrap
 import warnings
 warnings.filterwarnings("ignore") # for bootstrap CI
 
-try:
-    from cppn_neat.cppn import NodeType
-    from cppn_neat.graph_util import get_ids_from_individual, required_for_output
-except ModuleNotFoundError:
-    from cppn import NodeType
-    from graph_util import get_ids_from_individual, required_for_output
+from cppn_pytorch.cppn import NodeType
+from cppn_pytorch.graph_util import get_ids_from_individual, required_for_output
     
    
 def visualize_network(individual, sample_point=None, color_mode="L", visualize_disabled=False, layout='multi', sample=False, show_weights=False, use_inp_bias=False, use_radial_distance=True, save_name=None, extra_text=None, curved=False, return_fig=False):
