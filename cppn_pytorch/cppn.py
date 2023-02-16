@@ -9,23 +9,12 @@ from typing import Callable
 import torch
 
 from functorch.compile import compiled_function, draw_graph, aot_function
-
-
-try:
-    from activation_functions import identity
-    from graph_util import name_to_fn, choose_random_function, is_valid_connection
-    from graph_util import *
-    from graph_util import get_incoming_connections, feed_forward_layers
-    from graph_util import hsv2rgb
-    from config import Config
-except ModuleNotFoundError:
-    from cppn_neat.activation_functions import identity
-    from cppn_neat.graph_util import *
-    from cppn_neat.graph_util import name_to_fn, choose_random_function, is_valid_connection
-    from cppn_neat.graph_util import get_incoming_connections, feed_forward_layers
-    from cppn_neat.graph_util import hsv2rgb
-    from cppn_neat.config import Config
-
+from activation_functions import identity
+from graph_util import name_to_fn, choose_random_function, is_valid_connection
+from graph_util import *
+from graph_util import get_incoming_connections, feed_forward_layers
+from graph_util import hsv2rgb
+from config import Config
 
 def random_uniform(low=0.0, high=1.0, device='cpu', grad=False):
     return torch.rand(1, device=device, requires_grad=grad)[0] * (high - low) + low
