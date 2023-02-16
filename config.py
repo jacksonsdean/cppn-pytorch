@@ -7,12 +7,8 @@ from typing import Callable
 import imageio as iio
 import torch
 
-try:
-    from activation_functions import *
-    from graph_util import name_to_fn
-except ModuleNotFoundError:
-    from cppn_neat.activation_functions import *
-    from cppn_neat.graph_util import name_to_fn
+from activation_functions import *
+from graph_util import name_to_fn
 
 class Config:
     """Stores configuration parameters for the CPPN."""

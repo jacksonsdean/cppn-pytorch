@@ -11,7 +11,7 @@ setuptools.setup(
     description='CPPN implementation in PyTorch',
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url='https://github.com/mike-huls/toolbox',
+    url='https://github.com/jacksonsdean/cppn-pytorch',
     project_urls = {
         "Bug Tracker": "https://github.com/jacksonsdean/cppn-pytorch/issues"
     },
