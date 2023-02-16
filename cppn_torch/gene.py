@@ -107,11 +107,8 @@ class Node(Gene):
         self.layer = int(self.layer)
         self.sum_inputs = None
         self.outputs = None
-        try:
-            assert isinstance(self.activation, Callable), "activation function is not a function"
+        if isinstance(self.activation, Callable):
             self.activation = self.activation.__name__
-        except AttributeError:
-            pass
     
     def deserialize(self):
         """Makes the node functional"""
