@@ -168,7 +168,7 @@ class Config:
         if self.genome_type and not isinstance(self.genome_type, str):
             self.genome_type = self.genome_type.__name__
         self.device = str(self.device)
-        self.activations= [fn.__name__ if not isinstance(fn, str) else fn for fn in self.activations]
+        self.activations= [fn.__name__ if (not isinstance(fn, str) and not fn is None) else fn for fn in self.activations]
         if isinstance(self.fitness_function, Callable):
             self.fitness_function = self.fitness_function.__name__
         if self.fitness_schedule is not None:

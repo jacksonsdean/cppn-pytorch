@@ -647,6 +647,7 @@ class CPPN():
         recalculate = False
         recalculate = recalculate or force_recalculate
         if isinstance(self.image, torch.Tensor):
+            assert self.image is not None
             recalculate = recalculate or extra_inputs is not None # TODO we could cache the extra inputs and check
             recalculate = recalculate or self.config.res_h == self.image.shape[0]
             recalculate = recalculate or self.config.res_w == self.image.shape[1]
