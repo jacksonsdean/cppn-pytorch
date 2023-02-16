@@ -1,3 +1,3 @@
-from cppn import CPPN
-from gene import NodeType, Node, Connection
-from config import Config
+from cppn_pytorch.cppn import *
+from cppn_pytorch.gene import NodeType, Node, Connection
+from cppn_pytorch.config import Config
