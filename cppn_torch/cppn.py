@@ -320,6 +320,14 @@ class CPPN():
         for key, connection in self.connection_genome.items():
             if connection.enabled:
                 yield connection
+                
+    def count_enabled_connections(self):
+        """Returns the number of enabled connections."""
+        return sum(1 for _ in self.enabled_connections())
+    
+    def count_nodes(self):
+        """Returns the number of nodes."""
+        return len(self.node_genome)
 
     def mutate_activations(self, prob):
         """Mutates the activation functions of the nodes."""
