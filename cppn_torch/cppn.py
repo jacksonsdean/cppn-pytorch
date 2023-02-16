@@ -12,10 +12,7 @@ import torch
 
 from functorch.compile import compiled_function, draw_graph, aot_function
 from cppn_pytorch.activation_functions import identity
-from cppn_pytorch.graph_util import name_to_fn, choose_random_function, is_valid_connection
 from cppn_pytorch.graph_util import *
-from cppn_pytorch.graph_util import get_incoming_connections, feed_forward_layers
-from cppn_pytorch.graph_util import hsv2rgb
 from cppn_pytorch.config import Config
 from cppn_pytorch.gene import * 
 
@@ -576,8 +573,8 @@ class CPPN():
 
         if parallel:
             for _, node in self.node_genome.items():
-                node.sum_inputs = torch.ones((self.config.res_h, self.config.res_w), device=self.device)/2.0
-                node.outputs = torch.ones((self.config.res_h, self.config.res_w), device=self.device)/2.0
+                node.sum_inputs = torch.ones((1, self.config.res_h, self.config.res_w), device=self.device)/2.0
+                node.outputs = torch.ones((1, self.config.res_h, self.config.res_w), device=self.device)/2.0
         else:
             for _, node in self.node_genome.items():
                 node.sum_inputs = torch.zeros(1, device=self.device)
@@ -754,6 +751,7 @@ class CPPN():
                         this_idx = node_index - self.config.num_inputs
                         starting_input = extra_inputs[:,:,:,this_idx]
                 else:
+                    # not an input node
                     starting_input = torch.zeros((batch_size, res_h, res_w), dtype=torch.float32, device=self.device)
 
                 node.initialize_sum(starting_input)
