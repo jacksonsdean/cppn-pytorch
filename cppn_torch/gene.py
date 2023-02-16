@@ -2,9 +2,9 @@ from enum import IntEnum
 import json
 from typing import Callable
 import torch
-from cppn_pytorch.activation_functions import identity
+from cppn_torch.activation_functions import identity
 
-from cppn_pytorch.graph_util import name_to_fn
+from cppn_torch.graph_util import name_to_fn
 
 class NodeType(IntEnum):
     """Enum for the type of node."""

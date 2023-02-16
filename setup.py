@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name='cppn_torch',
-    version='0.0.6',
+    version='0.0.7',
     author='Jackson Dean',
     author_email='jackson@downbeat.games',
     description='CPPN implementation in PyTorch',

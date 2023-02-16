@@ -6,8 +6,8 @@ from typing import Callable
 import torch
 from skimage.color import hsv2rgb as sk_hsv2rgb
 import numpy as np
-import cppn_pytorch.activation_functions as af
-import cppn_pytorch.fitness_functions as ff
+import cppn_torch.activation_functions as af
+import cppn_torch.fitness_functions as ff
 
 
 def is_valid_connection(nodes, key:tuple, config):

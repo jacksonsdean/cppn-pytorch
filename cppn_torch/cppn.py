@@ -11,10 +11,10 @@ from typing import Union
 import torch
 
 from functorch.compile import compiled_function, draw_graph, aot_function
-from cppn_pytorch.activation_functions import identity
-from cppn_pytorch.graph_util import *
-from cppn_pytorch.config import Config
-from cppn_pytorch.gene import * 
+from cppn_torch.activation_functions import identity
+from cppn_torch.graph_util import *
+from cppn_torch.config import Config
+from cppn_torch.gene import * 
 
 def random_uniform(low=0.0, high=1.0, device: Union[str,torch.device] =torch.device('cpu'), grad=False):
     return torch.rand(1, device=device, requires_grad=grad)[0] * (high - low) + low
