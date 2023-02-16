@@ -315,7 +315,6 @@ class CPPN():
     def random_weight(self):
         """Returns a random weight between -max_weight and max_weight."""
         assert self.config is not None, "Config is None."
-        assert isinstance(self.device, torch.device), "Device is not a torch.device."
         # return random_uniform(-self.config.max_weight, self.config.max_weight, self.device, grad=True)
         return random_uniform(-self.config.max_weight, self.config.max_weight, self.device, grad=False)
 
@@ -345,7 +344,6 @@ class CPPN():
         adding a floating point number chosen from a uniform distribution of
         positive and negative values """
         assert self.config is not None, "Config is None."
-        assert isinstance(self.device, torch.device), "Device is not a torch.device."
 
         for _, connection in self.connection_genome.items():
             if random_uniform(0, 1) < prob:
