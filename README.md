@@ -1,4 +1,4 @@
-# cppn-neat
+# cppn_torch
 
 ## Installation
 With CUDA: 
