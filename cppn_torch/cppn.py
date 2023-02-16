@@ -328,7 +328,11 @@ class CPPN():
     def count_nodes(self):
         """Returns the number of nodes."""
         return len(self.node_genome)
-
+    
+    def count_activation_functions(self):
+        """Returns the number of unique activation functions."""
+        return len(set([n.activation for n in self.node_genome.values()]))
+    
     def mutate_activations(self, prob):
         """Mutates the activation functions of the nodes."""
         assert self.config is not None, "Config is None."
