@@ -666,12 +666,12 @@ class CPPN():
         else:  
             return self.forward_(extra_inputs=extra_inputs)
 
-    def backward(self, loss:torch.Tensor):
+    def backward(self, loss:torch.Tensor,retain_graph=False):
         """Backpropagates the error through the network."""
         assert self.config is not None
         assert self.config.with_grad, "Cannot backpropagate without gradients."
         self.optimizer.zero_grad()
-        loss.backward()
+        loss.backward(retain_graph=retain_graph)
         self.optimizer.step()
         self.outputs = None # new image
     
