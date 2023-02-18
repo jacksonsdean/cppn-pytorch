@@ -678,10 +678,11 @@ class CPPN():
     def discard_grads(self):
         for _, cx in self.connection_genome.items():
             if cx.weight.grad is not None:
-                cx.weight.grad.zero_()
-                cx.weight.requires_grad = False
+                # cx.weight.grad.zero_()
+                cx.weight = cx.weight.detach()
+                # cx.weight.requires_grad = False
         self.outputs = None # new image
-        self.fitness.requires_grad = False
+        self.fitness= self.fitness.detach()
     
     def genetic_difference(self, other) -> float:
         # only enabled connections, sorted by innovation id
