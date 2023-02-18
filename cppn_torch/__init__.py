@@ -3,3 +3,4 @@
 from .cppn import CPPN
 from .gene import Gene, Node, Connection    
 from .config import CPPNConfig
+from .image_cppn import ImageCPPN
