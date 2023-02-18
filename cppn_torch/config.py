@@ -19,6 +19,8 @@ class CPPNConfig:
         self.seed = random.randint(0, 100000)
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
+        self.with_grad = False # calculate autograd graph during forward pass
+        
         self.dry_run = False
         self.res_w = 28
         self.res_h = 28

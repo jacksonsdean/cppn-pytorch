@@ -305,20 +305,6 @@ def get_network_images(networks):
         imgs.append(img)  
     return imgs
 
-def get_best_solution_from_all_runs(results):
-    best_fit = -math.inf
-    best = None
-    run_index = -1
-    for i, run in enumerate(results):
-        sorted_run = sorted(run, key = lambda x: x.fitness, reverse=True)
-        run_best = sorted_run[0]
-        if(run_best.fitness > best_fit):
-            best_fit = run_best.fitness
-            best = run_best
-            run_index = i
-    return best, run_index
-
-
 def get_max_number_of_hidden_nodes(population):
     max = 0
     for g in population:

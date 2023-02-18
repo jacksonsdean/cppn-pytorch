@@ -7,7 +7,6 @@ import json
 import os
 from typing import Callable, List
 from typing import Union
-# import numpy as np
 import torch
 
 from functorch.compile import compiled_function, draw_graph, aot_function
@@ -32,7 +31,7 @@ def random_choice(choices, count, replace):
 class CPPN():
     """A CPPN Object with Nodes and Connections."""
 
-    pixel_inputs = torch.zeros((0, 0, 0), dtype=torch.float32,requires_grad=False) # (res_h, res_w, n_inputs)
+    constant_inputs = torch.zeros((0, 0, 0), dtype=torch.float32,requires_grad=False) # (res_h, res_w, n_inputs)
     current_id = 1 # 0 reserved for 'random' parent
     node_indexer = None
     
@@ -46,7 +45,7 @@ class CPPN():
         y_vals = torch.linspace(coord_range[0], coord_range[1], res_h, device=device,dtype=torch.float32)
 
         # initialize to 0s
-        CPPN.pixel_inputs = torch.zeros((res_h, res_w, n_inputs), dtype=torch.float32, device=device, requires_grad=False)
+        CPPN.constant_inputs = torch.zeros((res_h, res_w, n_inputs), dtype=torch.float32, device=device, requires_grad=False)
 
         # assign values:
         for y in range(res_h):
@@ -57,14 +56,14 @@ class CPPN():
                     this_pixel.append(torch.tensor(math.sqrt(y_vals[y]**2 + x_vals[x]**2)))
                 if use_bias:
                     this_pixel.append(torch.tensor(1.0)) # bias = 1.0
-                CPPN.pixel_inputs[y][x] = torch.tensor(this_pixel, dtype=torch.float32, device=device, requires_grad=False)
+                CPPN.constant_inputs[y][x] = torch.tensor(this_pixel, dtype=torch.float32, device=device, requires_grad=False)
 
     def __init__(self, config = None, nodes = None, connections = None) -> None:
         self.config = config
         if self.config is None:
             self.config = Config()
             
-        self.image = None
+        self.outputs = None
         self.node_genome = {}
         self.connection_genome = {}
         self.selected = False
@@ -177,25 +176,13 @@ class CPPN():
 
     def prepare_optimizer(self, opt_class=torch.optim.Adam, lr=1e-2):
         """Prepares the optimizer."""
-        self.image = None
+        self.outputs = None
         for cx in self.connection_genome.values():
             cx.weight = cx.weight.detach()
             cx.weight = torch.nn.Parameter(torch.tensor(cx.weight.item(), requires_grad=True))
         self.optimizer = opt_class([cx.weight for cx in self.connection_genome.values()], lr=lr)
 
-    def backwards(self):
-        """Backpropagates the error through the network."""
-        raise NotImplementedError
-        assert self.config is not None
-        print("-"*100)
-        print("Before: ", list(self.connection_genome.values())[0].weight)
-        # self.optimizer.zero_grad()
-        # loss = -self.fitness
-        # torch.autograd.set_detect_anomaly(True)
-        # self.loss.backward()
-        # self.optimizer.step()
-        self.image = None # new image
-        print("After: ", list(self.connection_genome.values())[0].weight)
+    
 
     def initialize_connection_genome(self):
         """Initializes the connection genome."""
@@ -214,12 +201,12 @@ class CPPN():
                                 new_cx.enabled = False
         
     def serialize(self):
-        del CPPN.pixel_inputs
+        del CPPN.constant_inputs
         assert self.config is not None, "Config is None."
-        CPPN.pixel_inputs = None
-        if self.image is not None:
-            self.image = self.image.cpu().numpy().tolist() if\
-                isinstance(self.image, torch.Tensor) else self.image
+        CPPN.constant_inputs = None
+        if self.outputs is not None:
+            self.outputs = self.outputs.cpu().numpy().tolist() if\
+                isinstance(self.outputs, torch.Tensor) else self.outputs
         for _, node in self.node_genome.items():
             node.serialize()
         for _, connection in self.connection_genome.items():
@@ -240,7 +227,7 @@ class CPPN():
         assert self.config is not None, "Config is None."
 
         self.serialize()
-        img = json.dumps(self.image) if self.image is not None else None
+        img = json.dumps(self.outputs) if self.outputs is not None else None
         # make copies to keep the CPPN intact
         copy_of_nodes = copy.deepcopy(self.node_genome).items()
         copy_of_connections = copy.deepcopy(self.connection_genome).items()
@@ -283,11 +270,6 @@ class CPPN():
             assert isinstance(self.node_genome[key], Node),\
                 f"Node is a {type(self.node_genome[key])}: {self.node_genome[key]}"
         
-        # make sure references are correct
-        # for key, cx in self.connection_genome.items():
-        #     cx.from_node = find_node_with_id(self.node_genome, cx.from_node.id)
-        #     cx.to_node = find_node_with_id(self.node_genome, cx.to_node.id)
-
         self.update_node_layers()
         assert self.config is not None, "Config is None."
         CPPN.initialize_inputs(self.config.res_h, self.config.res_w,
@@ -345,7 +327,7 @@ class CPPN():
         for node in eligible_nodes:
             if random_uniform(0,1) < prob:
                 node.activation = choose_random_function(self.config)
-        self.image = None # reset the image
+        self.outputs = None # reset the image
 
     def mutate_weights(self, prob):
         """
@@ -363,7 +345,7 @@ class CPPN():
                 connection.weight = self.random_weight()
 
         self.clamp_weights()
-        self.image = None # reset the image
+        self.outputs = None # reset the image
         
 
     def mutate(self, rates=None):
@@ -392,7 +374,7 @@ class CPPN():
         self.mutate_weights(mutate_weights)
         self.update_node_layers()
         # self.disable_invalid_connections()
-        self.image = None # reset the image
+        self.outputs = None # reset the image
         if hasattr(self, 'aot_fn'):
             del self.aot_fn # needs recompile
         
@@ -434,7 +416,7 @@ class CPPN():
                 break # found a valid connection, don't add more than one
 
             # else failed to find a valid connection, don't add and try again
-        self.image = None # reset the image
+        self.outputs = None # reset the image
 
     def add_node(self):
         """Adds a node to the CPPN.
@@ -478,7 +460,7 @@ class CPPN():
         self.connection_genome[new_cx_2.key] = new_cx_2
 
         self.update_node_layers() # update the layers of the nodes
-        self.image = None # reset the image
+        self.outputs = None # reset the image
         
     def remove_node(self):
         """Removes a node from the CPPN.
@@ -502,7 +484,7 @@ class CPPN():
 
         self.update_node_layers()
         self.disable_invalid_connections()
-        self.image = None # reset the image
+        self.outputs = None # reset the image
 
     def disable_connection(self):
         """Disables a connection."""
@@ -511,7 +493,7 @@ class CPPN():
             return
         cx = random_choice(eligible_cxs, 1, False)[0]
         cx.enabled = False
-        self.image = None # reset the image
+        self.outputs = None # reset the image
 
     def update_node_layers(self):
         """Update the node layers."""
@@ -598,134 +580,16 @@ class CPPN():
                 cx.weight.grad.zero_()
     
             
-    def eval(self, inputs):
+    def eval(self, inputs, extra_inputs=None):
         """Evaluates the CPPN."""
         self.set_inputs(inputs)
-        return self.feed_forward()
+        return self.forward_(extra_inputs)
 
-    def feed_forward(self):
-        """Feeds forward the network."""
-        assert self.config is not None, "Config is None."
-        layers = feed_forward_layers(self) # get layers
-        layers.insert(0, self.input_nodes().keys()) # add input nodes as first layer
-        for layer in layers:
-            # iterate over layers
-            for node_index, node_id in enumerate(layer):
-                # iterate over nodes in layer
-                node = find_node_with_id(self.node_genome, node_id) # the current node
-
-                # find incoming connections
-                node_inputs = get_incoming_connections(self, node)
-
-                # initialize the node's sum_inputs
-                if node.type == NodeType.INPUT:
-                    ...
-                else:
-                    node.initialize_sum(torch.zeros(1, device=self.device))
-
-                node.activate(node_inputs, self.node_genome)
-
-        # collect outputs from the last layer
-        outputs = torch.stack([node.outputs for node in self.output_nodes().values()])
-        assert len(outputs) == self.config.num_outputs, f"Number of outputs {len(outputs)} does not match config {self.config.num_outputs}"
-        return outputs
-
-    def get_image(self, force_recalculate=False, override_h=None, override_w=None, extra_inputs=None):
-        """Returns an image of the network.
-            Extra inputs are (batch_size, num_extra_inputs)
-        """
-        assert self.config is not None, "Config is None."
-        
-        # apply size override
-        if self.config.dirty:
-            raise RuntimeError("config is dirty, did you forget to call .reconfig after changing config?")
-       
-        if not extra_inputs is None:
-            assert extra_inputs.shape[-1] == self.config.num_extra_inputs, f"Wrong number of extra inputs {extra_inputs.shape[-1]} != {self.config.num_extra_inputs}"
-        
-        if override_h is not None:
-            self.config.res_h = override_h
-        if override_w is not None:
-            self.config.res_w = override_w
-        
-        if self.config.dry_run:
-            self.image = torch.rand((self.config.res_h, self.config.res_w, len(self.config.color_mode)), device=self.device)
-            return self.image
-
-        # decide if we need to recalculate the image
-        recalculate = False
-        recalculate = recalculate or force_recalculate
-        if isinstance(self.image, torch.Tensor):
-            assert self.image is not None
-            recalculate = recalculate or extra_inputs is not None # TODO we could cache the extra inputs and check
-            recalculate = recalculate or self.config.res_h == self.image.shape[0]
-            recalculate = recalculate or self.config.res_w == self.image.shape[1]
-        else:
-            # no cached image
-            recalculate = True
-
-        if not recalculate:
-            # return the cached image
-            assert self.image is not None
-            assert self.image.device == self.device, f"Image is on {self.image.device}, should be {self.device}"
-            assert self.image.dtype == torch.float32, f"Image is {self.image.dtype}, should be float32"
-            return self.image
-
-        if self.config.allow_recurrent:
-            # pixel by pixel (good for debugging/recurrent)
-            self.image = self.get_image_data_serial(extra_inputs=extra_inputs)
-        else:
-            # whole image at once (100sx faster)
-            self.image = self.get_image_data_parallel(extra_inputs=extra_inputs)
-
-        assert self.image.dtype == torch.float32, f"Image is {self.image.dtype}, should be float32"
-        assert str(self.image.device) == str(self.device), f"Image is on {self.image.device}, should be {self.device}"
-        return self.image
-
-    def get_image_data_serial(self, extra_inputs=None):
-        """Evaluate the network to get image data by processing each pixel
-        serially. Much slower than the parallel method, but required if the
-        network has recurrent connections."""
-        assert self.config is not None, "Config is None."
-        res_h, res_w = self.config.res_h, self.config.res_w
-        pixels: List[torch.Tensor] = []
-        
-        for x in torch.linspace(-.5, .5, res_w, dtype=torch.float32, device=self.device):
-            for y in torch.linspace(-.5, .5, res_h,dtype=torch.float32, device=self.device):
-                # slow
-                outputs = self.eval([x, y])
-                pixels.extend(outputs)
-                
-        pixels_tensor = torch.stack(pixels)
-        if len(self.config.color_mode)>2:
-            pixels_tensor = torch.reshape(pixels_tensor, (res_w, res_h, self.n_outputs))
-        else:
-            pixels_tensor = torch.reshape(pixels_tensor, (res_w, res_h))
-
-        self.image = pixels_tensor
-        return self.image
-
-    def get_image_data_parallel(self, extra_inputs=None):
-        """Evaluate the network to get image data in parallel
-            Extra inputs are (batch_size, num_extra_inputs)
-        """
+    def forward_(self, extra_inputs=None):
         assert self.config is not None, "Config is None."
         
         batch_size = 1 if extra_inputs is None else extra_inputs.shape[0]
         res_h, res_w = self.config.res_h, self.config.res_w
-        
-        if CPPN.pixel_inputs is None or\
-            CPPN.pixel_inputs.shape[0] != res_h or\
-            CPPN.pixel_inputs.shape[1] != res_w or\
-            CPPN.pixel_inputs.device != self.device:
-            # initialize inputs if the resolution or device changed
-            CPPN.initialize_inputs(res_h, res_w,
-                self.config.use_radial_distance,
-                self.config.use_input_bias,
-                self.config.num_inputs,
-                self.device)
-        
-        assert CPPN.pixel_inputs is not None
         
         if extra_inputs is not None:
             if len(extra_inputs.shape) == 1:
@@ -735,15 +599,13 @@ class CPPN():
                 # we want (batch_size, res_h, res_w, num_extra_inputs)
                 extra_inputs = extra_inputs.unsqueeze(1).unsqueeze(2).repeat(1, res_h, res_w, 1)
             
-                
         # reset the activations to 0 before evaluating
         self.reset_activations()
         
-        # reset the grads before evaluating
-        # self.reset_grads()
-
-        layers = feed_forward_layers(self) # get layers
+        # get layers
+        layers = feed_forward_layers(self) 
         layers.insert(0, self.input_nodes().keys()) # add input nodes as first layer
+        
         starting_input = None
         for layer in layers:
             # iterate over layers
@@ -757,7 +619,7 @@ class CPPN():
                 # initialize the node's sum_inputs
                 if node.type == NodeType.INPUT:
                     if node_index < self.config.num_inputs:
-                        starting_input = CPPN.pixel_inputs[:,:,node_index].repeat(batch_size, 1, 1) # (batch_size, res_h, res_w)
+                        starting_input = CPPN.constant_inputs[:,:,node_index].repeat(batch_size, 1, 1) # (batch_size, res_h, res_w)
                     elif extra_inputs is not None:
                         # we want (batch_size, res_h, res_w)
                         this_idx = node_index - self.config.num_inputs
@@ -774,69 +636,42 @@ class CPPN():
         outputs = torch.stack([node.outputs for node in self.output_nodes().values()])
         assert str(outputs.device) == str(self.device), f"Output is on {outputs.device}, should be {self.device}"
 
-        if len(self.config.color_mode)>2:
-            outputs =  outputs.permute(1, 2, 3, 0) # move color axis to end
-        else:
-            outputs = torch.reshape(outputs, (batch_size, res_h, res_w))
-
-        if batch_size == 1:
-            outputs = outputs.squeeze(0) # remove batch dimension if batch size is 1
-            # reshape the outputs to image shape
-            if not len(self.config.color_mode)>2:
-                outputs = torch.reshape(outputs, (res_h, res_w))
-
-        self.image = outputs
+        self.outputs = outputs
         
-        if self.config.normalize_outputs:
-            self.normalize_image()
-        else:
-            ...
-            # just convert to 0-255 range and uints
-            # self.image = self.image * 255
-            # self.image = self.image.to(torch.uint8)
-        
-        assert str(self.image.device )== str(self.device), f"Image is on {self.image.device}, should be {self.device}"
-        assert self.image.dtype == torch.float32, f"Image is {self.image.dtype}, should be float32"
-        return self.image
-
-    def get_image_with_grads(self, extra_inputs=None):
-        if not hasattr(self, 'aot_fn'):
-            def f(x):
-                return self.get_image_data_parallel(extra_inputs=x) 
-            def fw(f, inps):
-                return f
-            def bw(f, inps):
-                return f
-            
-            self.aot_fn = aot_function(f, fw_compiler=fw, bw_compiler=bw)
-        
-        return self.aot_fn(extra_inputs)
+        assert str(self.outputs.device )== str(self.device), f"Output is on {self.outputs.device}, should be {self.device}"
+        assert self.outputs.dtype == torch.float32, f"Output is {self.outputs.dtype}, should be float32"
+        return self.outputs
     
-
-    def normalize_image(self):
-        """Normalize from outputs (any range) to 0 through 255 and convert to ints"""
-        assert self.image is not None, "No image to normalize"
-        assert self.image.dtype == torch.float32, f"Image is not float32, is {self.image.dtype}"
-        assert str(self.image.device) == str(self.device), f"Image is on {self.image.device}, should be {self.device}"
+    def forward(self, extra_inputs=None):
+        """Feeds forward the network."""
+        
         assert self.config is not None, "Config is None."
-        
-        # image = 1.0 - torch.abs(self.image)
-
-        max_value = torch.max(self.image)
-        min_value = torch.min(self.image)
-        image_range = max_value - min_value
-        self.image = self.image - min_value
-        self.image = self.image/(image_range+1e-8)
-
-        # self.image = torch.clamp(self.image, min=0, max=1)
+        if self.config.with_grad:
+            self.reset_grads()
             
-        if self.config.color_mode == 'HSL':
-            # assume output is HSL and convert to RGB
-            self.image = hsv2rgb(self.image) # convert to RGB
-        
-        # self.image *= 255
-        # self.image = self.image.to(torch.uint8)
-        
+            if not hasattr(self, 'aot_fn'):
+                def f(x):
+                    return self.forward_(extra_inputs=x) 
+                def fw(f, inps):
+                    return f
+                def bw(f, inps):
+                    return f
+                
+                self.aot_fn = aot_function(f, fw_compiler=fw, bw_compiler=bw)
+            
+            return self.aot_fn(extra_inputs)  
+        else:  
+            return self.forward_(extra_inputs=extra_inputs)
+
+    def backward(self, loss:torch.Tensor):
+        """Backpropagates the error through the network."""
+        assert self.config is not None
+        assert self.config.with_grad, "Cannot backpropagate without gradients."
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.outputs = None # new image
+    
     def genetic_difference(self, other) -> float:
         # only enabled connections, sorted by innovation id
         this_cxs = sorted(self.enabled_connections(),
@@ -951,8 +786,8 @@ class CPPN():
         for key, cx in self.connection_genome.items():
             cx.to_cpu()
         self.fitness = self.fitness.cpu()
-        if self.image is not None:
-            self.image = self.image.cpu()
+        if self.outputs is not None:
+            self.outputs = self.outputs.cpu()
         self.adjusted_fitness = self.adjusted_fitness.cpu()
         self.novelty = self.novelty.cpu()
 
