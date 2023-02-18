@@ -683,6 +683,8 @@ class CPPN():
                 # cx.weight.requires_grad = False
         self.outputs = None # new image
         self.fitness= self.fitness.detach()
+        self.optimizer = None
+        
     
     def genetic_difference(self, other) -> float:
         # only enabled connections, sorted by innovation id
