@@ -185,8 +185,6 @@ class CPPN():
             cx.weight = torch.nn.Parameter(torch.tensor(cx.weight.item(), requires_grad=True))
         self.optimizer = opt_class([cx.weight for cx in self.connection_genome.values()], lr=lr)
 
-    
-
     def initialize_connection_genome(self):
         """Initializes the connection genome."""
         assert self.config is not None, "Config is None."
@@ -823,7 +821,7 @@ class CPPN():
             # detach from current graph
             has_grad = cx.weight.requires_grad
             cx.weight = cx.weight.detach()
-            cx.weight = torch.tensor(cx.weight.item(), requires_grad=has_grad)
+            cx.weight = torch.tensor(cx.weight.item())#, requires_grad=has_grad)
         if cpu:
             child.to_cpu()
         child.set_id(id)
