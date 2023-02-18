@@ -20,6 +20,8 @@ class CPPNConfig:
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
         self.with_grad = False # calculate autograd graph during forward pass
+        self.sgd_learning_rate = 0.01
+        self.sgd_epochs = 100 # batch size is 1
         
         self.dry_run = False
         self.res_w = 28

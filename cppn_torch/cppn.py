@@ -174,8 +174,11 @@ class CPPN():
             params[f"w_{cx.key}"] = cx.weight
         return params
 
-    def prepare_optimizer(self, opt_class=torch.optim.Adam, lr=1e-2):
+    def prepare_optimizer(self, opt_class=torch.optim.Adam, lr=None):
         """Prepares the optimizer."""
+        assert self.config is not None, "Config is None."
+        if lr is None:
+            lr = self.config.sgd_learning_rate
         self.outputs = None
         for cx in self.connection_genome.values():
             cx.weight = cx.weight.detach()
@@ -647,7 +650,7 @@ class CPPN():
         
         assert self.config is not None, "Config is None."
         if self.config.with_grad:
-            self.reset_grads()
+            # self.reset_grads()
             
             if not hasattr(self, 'aot_fn'):
                 def f(x):
