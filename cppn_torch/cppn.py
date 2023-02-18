@@ -677,13 +677,12 @@ class CPPN():
         for _, cx in self.connection_genome.items():
             if cx.weight.grad is not None:
                 # cx.weight.grad.zero_()
-                cx.weight = cx.weight.detach()
+                cx.weight = torch.tensor(cx.weight.detach().item())
                 # cx.weight.requires_grad = False
         self.outputs = None # new image
-        self.fitness= self.fitness.detach()
+        self.fitness= torch.tensor(self.fitness.detach().item())
         self.optimizer = None
         
-    
     def genetic_difference(self, other) -> float:
         # only enabled connections, sorted by innovation id
         this_cxs = sorted(self.enabled_connections(),
