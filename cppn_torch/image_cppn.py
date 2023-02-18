@@ -1,3 +1,5 @@
+import os
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 from typing import List
 
 import torch
@@ -115,19 +117,19 @@ class ImageCPPN(CPPN):
         assert CPPN.constant_inputs is not None
         
         # evaluate CPPN
-        outputs = super().forward_(extra_inputs=extra_inputs)
+        self.outputs = super().forward_(extra_inputs=extra_inputs)
 
 
         if len(self.config.color_mode)>2:
-            outputs =  outputs.permute(1, 2, 3, 0) # move color axis to end
+            self.outputs  =  self.outputs.permute(1, 2, 3, 0) # move color axis to end
         else:
-            outputs = torch.reshape(outputs, (batch_size, res_h, res_w))
+            self.outputs  = torch.reshape(self.outputs , (batch_size, res_h, res_w))
 
         if batch_size == 1:
-            outputs = outputs.squeeze(0) # remove batch dimension if batch size is 1
+            self.outputs  = self.outputs.squeeze(0) # remove batch dimension if batch size is 1
             # reshape the outputs to image shape
             if not len(self.config.color_mode)>2:
-                outputs = torch.reshape(outputs, (res_h, res_w))
+                self.outputs  = torch.reshape(self.outputs, (res_h, res_w))
         
         if self.config.normalize_outputs:
             self.normalize_image()
@@ -153,3 +155,13 @@ class ImageCPPN(CPPN):
             # assume output is HSL and convert to RGB
             self.outputs = hsv2rgb(self.outputs) # convert to RGB
         
+        
+if __name__ == '__main__':
+    # run a test
+    import matplotlib.pyplot as plt
+
+    net = ImageCPPN()
+    i = net.get_image().cpu()
+    
+    plt.imshow(i)
+    plt.show()
