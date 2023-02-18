@@ -163,3 +163,9 @@ if __name__ == '__main__':
     
     plt.imshow(i)
     plt.show()
+    for _ in range(10):
+        net.mutate()
+        
+    i = net.get_image().cpu()
+    plt.imshow(i)
+    plt.show()

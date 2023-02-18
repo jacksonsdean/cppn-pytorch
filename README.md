@@ -9,25 +9,25 @@ With CUDA:
 
 Basic
 ```python
-from cppn_torch import CPPN
+from cppn_torch import ImageCPPN
 import matplotlib.pyplot as plt
 
-net = CPPN()
+net = ImageCPPN()
 
 image = net.get_image()
-plt.imshow(image)
+plt.imshow(image.cpu())
 ```
 
 Change configuration
 ```python
-from cppn_torch import CPPN, Config
+from cppn_torch import ImageCPPN, Config
 import matplotlib.pyplot as plt
 
 config = Config()
 config.activations = ['sin']
 
-net = CPPN(config)
+net = ImageCPPN(config)
 
 image = net.get_image()
-plt.imshow(image)
+plt.imshow(image.cpu())
 ```
