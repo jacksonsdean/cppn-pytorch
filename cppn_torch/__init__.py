@@ -2,4 +2,4 @@
 # allow imports like: from cppn_torch import CPPN
 from .cppn import CPPN
 from .gene import Gene, Node, Connection    
-from .config import Config
+from .config import CPPNConfig

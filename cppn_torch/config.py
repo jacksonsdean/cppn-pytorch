@@ -10,55 +10,29 @@ import torch
 from cppn_torch.activation_functions import *
 from cppn_torch.graph_util import name_to_fn
 
-class Config:
+class CPPNConfig:
     """Stores configuration parameters for the CPPN."""
     # pylint: disable=too-many-instance-attributes
     def __init__(self) -> None:
         # Initialize to default values
-        # These are only used if the frontend client doesn't override them
+        # These are only used if a sub-class does not override them
+        self.seed = random.randint(0, 100000)
+        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
+
         self.dry_run = False
-        self.target = None
-        self.population_size = 10
-        self.num_generations = 1000
-        self.species_target = 3
-        self.population_elitism = 1
-        self.within_species_elitism = 1 # TODO NOT SURE IF WORKS
         self.res_w = 28
         self.res_h = 28
         self.save_w = 512
         self.save_h = 512
         self.color_mode = "RGB"
         # self.color_mode = "L"
-        self.do_crossover = True
-        self.crossover_ratio = .75 # from original NEAT
-        self.use_dynamic_mutation_rates = False
-        self.dynamic_mutation_rate_end_modifier = 0.1
+        
         self.allow_recurrent = False
         self.init_connection_probability = 0.85
         self.activations = get_all()
-        # self.activations=  [sin, sigmoid, gauss, identity, round_activation, abs_activation, pulse] # innovation engines
-        # self.activations =  [sin] # TODO testing
-        self.seed = random.randint(0, 100000)
-        self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.normalize_outputs = True
-        self.genome_type = None
         
-        self.novelty_selection_ratio_within_species = 0
-        self.novelty_adjusted_fitness_proportion = 0
-        
-        # self.fitness_function = 'test' # should get all white pixels
-        # self.fitness_function = 'xor' # for debugging
-        self.fitness_function = 'mse' #     default -mse
-        # self.fitness_function = 'average' # all fitness functions are averaged
-        # self.fitness_function = 'dists' # Deep Image Structure and Texture Similarity
-        # self.fitness_function = 'haarpsi' # perceptual similarity
-        self.fitness_schedule_type = "alternating"
-        self.fitness_schedule_period = 10
-        # self.fitness_schedule = ["mse", "haarpsi", "ssim", "psnr", "fsim"]
-        # self.fitness_schedule = ["mse", "psnr"]
-        self.fitness_schedule = None
-        self.min_fitness = None
-        self.max_fitness = None
+        self.genome_type = None # default to CPPN
         
         # NEAT specific parameters
         self.use_speciation = True
@@ -116,24 +90,6 @@ class Config:
         if self.use_radial_distance:
             self.num_inputs += 1
             
-        # MAP-Elites-Voting
-        self.map_elites_resolution = [30]
-        self.map_elites_max_values = [.8]
-        self.map_elites_min_values = [.1]
-        self.map_elites_voting_fns_per_cell = 2
-        self.allow_jumps = True
-   
-        # MAP-Elites
-        # self.map_elites_resolution = [8, 20, 10]
-        # self.map_elites_max_values = [.6, 28, 1]
-        # self.map_elites_min_values = [0, 8, .9]
-
-        self.novelty_archive_len = 20
-        self.novelty_k = 5
-        self.autoencoder_frequency = 10
-        
-        self.target_name = None
-        
         self._make_dirty()
         
     def __setattr__(self, key, value):
