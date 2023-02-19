@@ -631,10 +631,10 @@ class CPPN():
                     elif extra_inputs is not None:
                         # we want (batch_size, res_h, res_w)
                         this_idx = node_index - self.config.num_inputs
-                        starting_input = extra_inputs[:,:,:,this_idx]
+                        starting_input = extra_inputs[:,:,:, this_idx]
                 else:
                     # not an input node
-                    starting_input = torch.zeros((batch_size, res_h, res_w), dtype=torch.float32, device=self.device)
+                    starting_input = torch.zeros((batch_size, res_h, res_w), dtype=torch.float32, device=self.device, requires_grad=self.config.with_grad)
 
                 node.initialize_sum(starting_input)
                 # initialize the sum_inputs for this node

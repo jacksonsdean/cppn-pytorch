@@ -131,7 +131,7 @@ def get_incoming_connections(individual, node):
 
 
 def hsv2rgb(hsv):
-    return torch.tensor(sk_hsv2rgb(hsv))
+    return torch.tensor(sk_hsv2rgb(hsv), dtype=torch.float32, device=hsv.device)
       
 
 
