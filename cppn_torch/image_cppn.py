@@ -153,6 +153,10 @@ class ImageCPPN(CPPN):
         if self.config.color_mode == 'HSL':
             # assume output is HSL and convert to RGB
             self.outputs = hsv2rgb(self.outputs) # convert to RGB
+    
+    def __deepcopy__(self, memo):
+        """Deep copy the network"""
+        return super().__deepcopy__(memo)
         
 if __name__ == '__main__':
     # run a test
