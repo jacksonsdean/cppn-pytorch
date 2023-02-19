@@ -816,7 +816,7 @@ class CPPN():
         self.adjusted_fitness = self.adjusted_fitness.cpu()
         self.novelty = self.novelty.cpu()
 
-    @torch.no_grad()
+    # @torch.no_grad()
     def clone(self, deepcopy=True, cpu=False, new_id=False):
         """ Create a copy of this genome. """
         id = self.id if (not new_id) else type(self).get_id()
