@@ -102,18 +102,18 @@ class ImageCPPN(CPPN):
         res_h, res_w = self.config.res_h, self.config.res_w
         
         # lazy initialize the constant inputs
-        if __class__.constant_inputs is None or\
-            __class__.constant_inputs.shape[0] != res_h or\
-            __class__.constant_inputs.shape[1] != res_w or\
-            __class__.constant_inputs.device != self.device:
+        if type(self).constant_inputs is None or\
+            type(self).constant_inputs.shape[0] != res_h or\
+            type(self).constant_inputs.shape[1] != res_w or\
+            type(self).constant_inputs.device != self.device:
             # initialize inputs if the resolution or device changed
-            __class__.initialize_inputs(res_h, res_w,
+            type(self).initialize_inputs(res_h, res_w,
                 self.config.use_radial_distance,
                 self.config.use_input_bias,
                 self.config.num_inputs,
                 self.device)
         
-        assert __class__.constant_inputs is not None
+        assert type(self).constant_inputs is not None
         
         # evaluate CPPN
         self.outputs = super().forward_(extra_inputs=extra_inputs)

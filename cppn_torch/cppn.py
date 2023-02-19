@@ -68,7 +68,7 @@ class CPPN():
         self.connection_genome = {}
         self.selected = False
         self.species_id = 0
-        self.id = self.__class__.get_id()
+        self.id = type(self).get_id()
         
         self.reconfig(self.config, nodes, connections)
         
@@ -116,15 +116,15 @@ class CPPN():
 
     def get_new_node_id(self):
         """Returns a new node id`."""
-        if self.__class__.node_indexer is None:
+        if type(self).node_indexer is None:
             if self.node_genome == {}:
                 return 0
             if self.node_genome is not None:
-                self.__class__.node_indexer = count(max(list(self.node_genome)) + 1)
+                type(self).node_indexer = count(max(list(self.node_genome)) + 1)
             else:
-                self.__class__.node_indexer = count(max(list(self.node_genome)) + 1)
+                type(self).node_indexer = count(max(list(self.node_genome)) + 1)
 
-        new_id = next(self.__class__.node_indexer)
+        new_id = next(type(self).node_indexer)
         assert new_id not in self.node_genome.keys()
         return new_id
     
@@ -202,9 +202,9 @@ class CPPN():
                                 new_cx.enabled = False
         
     def serialize(self):
-        del self.__class__.constant_inputs
+        del type(self).constant_inputs
         assert self.config is not None, "Config is None."
-        self.__class__.constant_inputs = None
+        type(self).constant_inputs = None
         if self.outputs is not None:
             self.outputs = self.outputs.cpu().numpy().tolist() if\
                 isinstance(self.outputs, torch.Tensor) else self.outputs
@@ -273,7 +273,7 @@ class CPPN():
         
         self.update_node_layers()
         assert self.config is not None, "Config is None."
-        self.__class__.initialize_inputs(self.config.res_h, self.config.res_w,
+        type(self).initialize_inputs(self.config.res_h, self.config.res_w,
                 self.config.use_radial_distance,
                 self.config.use_input_bias,
                 self.config.num_inputs,
@@ -620,7 +620,7 @@ class CPPN():
                 # initialize the node's sum_inputs
                 if node.type == NodeType.INPUT:
                     if node_index < self.config.num_inputs:
-                        starting_input = self.__class__.constant_inputs[:,:,node_index].repeat(batch_size, 1, 1) # (batch_size, res_h, res_w)
+                        starting_input = type(self).constant_inputs[:,:,node_index].repeat(batch_size, 1, 1) # (batch_size, res_h, res_w)
                     elif extra_inputs is not None:
                         # we want (batch_size, res_h, res_w)
                         this_idx = node_index - self.config.num_inputs
@@ -808,14 +808,14 @@ class CPPN():
     @torch.no_grad()
     def clone(self, deepcopy=True, cpu=False, new_id=False):
         """ Create a copy of this genome. """
-        id = self.id if (not new_id) else self.__class__.get_id()
+        id = self.id if (not new_id) else type(self).get_id()
         if deepcopy:
             child = copy.deepcopy(self)
             child.set_id(id)
             if cpu:
                 child.to_cpu()
             return child
-        child = self.__class__(self.config, {}, {})
+        child = type(self)(self.config, {}, {})
         child.connection_genome = {key: cx.copy() for key, cx in self.connection_genome.items()}        
         child.node_genome = {key: node.copy() for key, node in self.node_genome.items()}
         child.update_node_layers()
