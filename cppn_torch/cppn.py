@@ -202,7 +202,7 @@ class CPPN():
                                 new_cx.enabled = False
         
     def serialize(self):
-        del type(self).constant_inputs
+        # del type(self).constant_inputs
         assert self.config is not None, "Config is None."
         type(self).constant_inputs = None
         if self.outputs is not None:
