@@ -16,7 +16,7 @@ class ImageCPPN(CPPN):
     def image(self):
         return self.outputs
    
-    def get_image(self, inputs=None, force_recalculate=False, override_h=None, override_w=None, extra_inputs=None):
+    def get_image(self, inputs=None, force_recalculate=False, override_h=None, override_w=None, extra_inputs=None, no_aot=True):
         """Returns an image of the network.
             Extra inputs are (batch_size, num_extra_inputs)
         """
@@ -62,7 +62,7 @@ class ImageCPPN(CPPN):
             self.outputs = self.get_image_data_serial(extra_inputs=extra_inputs)
         else:
             # whole image at once (100sx faster)
-            self.outputs = self.forward(inputs=inputs, extra_inputs=extra_inputs, no_aot=True)
+            self.outputs = self.forward(inputs=inputs, extra_inputs=extra_inputs, no_aot=no_aot)
 
         assert self.outputs.dtype == torch.float32, f"Image is {self.outputs.dtype}, should be float32"
         assert str(self.outputs.device) == str(self.device), f"Image is on {self.outputs.device}, should be {self.device}"
