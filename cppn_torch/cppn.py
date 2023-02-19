@@ -45,7 +45,7 @@ class CPPN():
         y_vals = torch.linspace(coord_range[0], coord_range[1], res_h, device=device,dtype=torch.float32)
 
         # initialize to 0s
-        __class__constant_inputs = torch.zeros((res_h, res_w, n_inputs), dtype=torch.float32, device=device, requires_grad=False)
+        __class__.constant_inputs = torch.zeros((res_h, res_w, n_inputs), dtype=torch.float32, device=device, requires_grad=False)
 
         # assign values:
         for y in range(res_h):
@@ -56,7 +56,7 @@ class CPPN():
                     this_pixel.append(torch.tensor(math.sqrt(y_vals[y]**2 + x_vals[x]**2)))
                 if use_bias:
                     this_pixel.append(torch.tensor(1.0)) # bias = 1.0
-                __class__constant_inputs[y][x] = torch.tensor(this_pixel, dtype=torch.float32, device=device, requires_grad=False)
+                __class__.constant_inputs[y][x] = torch.tensor(this_pixel, dtype=torch.float32, device=device, requires_grad=False)
 
     def __init__(self, config = None, nodes = None, connections = None) -> None:
         self.config = config
@@ -68,7 +68,7 @@ class CPPN():
         self.connection_genome = {}
         self.selected = False
         self.species_id = 0
-        self.id = __class__get_id()
+        self.id = __class__.get_id()
         
         self.reconfig(self.config, nodes, connections)
         
@@ -202,9 +202,9 @@ class CPPN():
                                 new_cx.enabled = False
         
     def serialize(self):
-        del __class__constant_inputs
+        del __class__.constant_inputs
         assert self.config is not None, "Config is None."
-        __class__constant_inputs = None
+        __class__.constant_inputs = None
         if self.outputs is not None:
             self.outputs = self.outputs.cpu().numpy().tolist() if\
                 isinstance(self.outputs, torch.Tensor) else self.outputs
@@ -273,7 +273,7 @@ class CPPN():
         
         self.update_node_layers()
         assert self.config is not None, "Config is None."
-        __class__initialize_inputs(self.config.res_h, self.config.res_w,
+        __class__.initialize_inputs(self.config.res_h, self.config.res_w,
                 self.config.use_radial_distance,
                 self.config.use_input_bias,
                 self.config.num_inputs,
@@ -620,7 +620,7 @@ class CPPN():
                 # initialize the node's sum_inputs
                 if node.type == NodeType.INPUT:
                     if node_index < self.config.num_inputs:
-                        starting_input = __class__constant_inputs[:,:,node_index].repeat(batch_size, 1, 1) # (batch_size, res_h, res_w)
+                        starting_input = __class__.constant_inputs[:,:,node_index].repeat(batch_size, 1, 1) # (batch_size, res_h, res_w)
                     elif extra_inputs is not None:
                         # we want (batch_size, res_h, res_w)
                         this_idx = node_index - self.config.num_inputs
