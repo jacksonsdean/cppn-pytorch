@@ -111,7 +111,8 @@ class ImageCPPN(CPPN):
                 self.config.use_radial_distance,
                 self.config.use_input_bias,
                 self.config.num_inputs,
-                self.device)
+                self.device,
+                type=type(self))
         
         assert type(self).constant_inputs is not None
         

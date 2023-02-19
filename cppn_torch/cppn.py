@@ -37,15 +37,16 @@ class CPPN():
     
     
     @staticmethod
-    def initialize_inputs(res_h, res_w, use_radial_dist, use_bias, n_inputs, device, coord_range=(-.5,.5) ):
+    def initialize_inputs(res_h, res_w, use_radial_dist, use_bias, n_inputs, device, coord_range=(-.5,.5),type=None ):
         """Initializes the pixel inputs."""
-
+        if type is None:
+            type = __class__
         # Pixel coordinates are linear within coord_range
         x_vals = torch.linspace(coord_range[0], coord_range[1], res_w, device=device,dtype=torch.float32)
         y_vals = torch.linspace(coord_range[0], coord_range[1], res_h, device=device,dtype=torch.float32)
 
         # initialize to 0s
-        __class__.constant_inputs = torch.zeros((res_h, res_w, n_inputs), dtype=torch.float32, device=device, requires_grad=False)
+        type.constant_inputs = torch.zeros((res_h, res_w, n_inputs), dtype=torch.float32, device=device, requires_grad=False)
 
         # assign values:
         for y in range(res_h):
@@ -56,7 +57,7 @@ class CPPN():
                     this_pixel.append(torch.tensor(math.sqrt(y_vals[y]**2 + x_vals[x]**2)))
                 if use_bias:
                     this_pixel.append(torch.tensor(1.0)) # bias = 1.0
-                __class__.constant_inputs[y][x] = torch.tensor(this_pixel, dtype=torch.float32, device=device, requires_grad=False)
+                type.constant_inputs[y][x] = torch.tensor(this_pixel, dtype=torch.float32, device=device, requires_grad=False)
 
     def __init__(self, config = None, nodes = None, connections = None) -> None:
         self.config = config
