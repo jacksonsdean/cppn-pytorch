@@ -837,7 +837,7 @@ class CPPN():
             # detach from current graph
             has_grad = cx.weight.requires_grad
             cx.weight = cx.weight.detach()
-            cx.weight = torch.tensor(cx.weight.item())#, requires_grad=has_grad)
+            cx.weight = torch.tensor(cx.weight.item()) # require prepare_optimizer() again
         if cpu:
             child.to_cpu()
         child.set_id(id)
