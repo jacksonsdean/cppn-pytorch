@@ -698,9 +698,11 @@ class CPPN():
         self.reset_activations()
         self.outputs = None # new image
         self.fitness= torch.tensor(self.fitness.detach().item(), device=self.device)
-        del self.optimizer
-        self.optimizer = None
-        del self.aot_fn
+        if hasattr(self, 'optimizer'):
+            del self.optimizer
+            self.optimizer = None
+        if hasattr(self, 'aot_fn'):
+            del self.aot_fn
         
     
     def genetic_difference(self, other) -> float:
