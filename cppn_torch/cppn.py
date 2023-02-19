@@ -675,14 +675,17 @@ class CPPN():
     
     def discard_grads(self):
         for _, cx in self.connection_genome.items():
-            if cx.weight.grad is not None:
+            cx.weight = torch.tensor(cx.weight.detach().item())
+            # if cx.weight.grad is not None:
                 # cx.weight.grad.zero_()
-                cx.weight = torch.tensor(cx.weight.detach().item())
+                # cx.weight = torch.tensor(cx.weight.detach().item())
+                # cx.weight.requires_grad = False
                 # cx.weight.requires_grad = False
         self.outputs = None # new image
         self.fitness= torch.tensor(self.fitness.detach().item())
         self.optimizer = None
         
+    
     def genetic_difference(self, other) -> float:
         # only enabled connections, sorted by innovation id
         this_cxs = sorted(self.enabled_connections(),
@@ -805,14 +808,14 @@ class CPPN():
     @torch.no_grad()
     def clone(self, deepcopy=True, cpu=False, new_id=False):
         """ Create a copy of this genome. """
-        id = self.id if (not new_id) else CPPN.get_id()
+        id = self.id if (not new_id) else self.__class__.get_id()
         if deepcopy:
             child = copy.deepcopy(self)
             child.set_id(id)
             if cpu:
                 child.to_cpu()
             return child
-        child = CPPN(self.config, {}, {})
+        child = self.__class__(self.config, {}, {})
         child.connection_genome = {key: cx.copy() for key, cx in self.connection_genome.items()}        
         child.node_genome = {key: node.copy() for key, node in self.node_genome.items()}
         child.update_node_layers()
