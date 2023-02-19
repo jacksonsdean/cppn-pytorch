@@ -650,11 +650,11 @@ class CPPN():
         assert self.outputs.dtype == torch.float32, f"Output is {self.outputs.dtype}, should be float32"
         return self.outputs
     
-    def forward(self, inputs=None, extra_inputs=None):
+    def forward(self, inputs=None, extra_inputs=None, no_aot=True):
         """Feeds forward the network."""
         
         assert self.config is not None, "Config is None."
-        if self.config.with_grad:
+        if self.config.with_grad and not no_aot:
             # self.reset_grads()
             
             if not hasattr(self, 'aot_fn'):
