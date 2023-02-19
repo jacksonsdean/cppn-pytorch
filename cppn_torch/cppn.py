@@ -819,6 +819,9 @@ class CPPN():
     # @torch.no_grad()
     def clone(self, deepcopy=True, cpu=False, new_id=False):
         """ Create a copy of this genome. """
+        if hasattr(self, 'aot_fn'):
+            # can't clone AOT functions
+            del self.aot_fn
         id = self.id if (not new_id) else type(self).get_id()
         if deepcopy:
             child = copy.deepcopy(self)
