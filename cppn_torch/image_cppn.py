@@ -92,7 +92,7 @@ class ImageCPPN(CPPN):
         self.outputs = pixels_tensor
         return self.outputs
 
-    def forward_(self, extra_inputs=None):
+    def forward_(self, inputs=None, extra_inputs=None):
         """Evaluate the network to get output data in parallel
             Extra inputs are (batch_size, num_extra_inputs)
         """
@@ -101,24 +101,30 @@ class ImageCPPN(CPPN):
         batch_size = 1 if extra_inputs is None else extra_inputs.shape[0]
         res_h, res_w = self.config.res_h, self.config.res_w
         
-        # lazy initialize the constant inputs
-        if type(self).constant_inputs is None or\
-            type(self).constant_inputs.shape[0] != res_h or\
-            type(self).constant_inputs.shape[1] != res_w or\
-            type(self).constant_inputs.device != self.device:
-            # initialize inputs if the resolution or device changed
-            type(self).initialize_inputs(res_h, res_w,
-                self.config.use_radial_distance,
-                self.config.use_input_bias,
-                self.config.num_inputs,
-                self.device,
-                type=type(self))
-        
-        assert type(self).constant_inputs is not None
-        
+        if inputs is None:
+            # lazy initialize the constant inputs
+            if type(self).constant_inputs is None or\
+                type(self).constant_inputs.shape[0] != res_h or\
+                type(self).constant_inputs.shape[1] != res_w or\
+                type(self).constant_inputs.device != self.device:
+                # initialize inputs if the resolution or device changed
+                type(self).initialize_inputs(res_h, res_w,
+                    self.config.use_radial_distance,
+                    self.config.use_input_bias,
+                    self.config.num_inputs,
+                    self.device,
+                    type=type(self))
+                
+            inputs = type(self).constant_inputs
+            
+        assert inputs is not None
+        assert inputs.shape[0] == res_h
+        assert inputs.shape[1] == res_w
+        assert inputs.shape[2] == self.config.num_inputs
+        assert inputs.device == self.device
+            
         # evaluate CPPN
-        self.outputs = super().forward_(extra_inputs=extra_inputs)
-
+        self.outputs = super().forward_(inputs=inputs, extra_inputs=extra_inputs)
 
         if len(self.config.color_mode)>2:
             self.outputs  =  self.outputs.permute(1, 2, 3, 0) # move color axis to end

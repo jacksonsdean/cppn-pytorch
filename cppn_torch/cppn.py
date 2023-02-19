@@ -584,14 +584,18 @@ class CPPN():
             
     def eval(self, inputs, extra_inputs=None):
         """Evaluates the CPPN."""
+        raise NotImplementedError("Use forward() instead.")
         self.set_inputs(inputs)
-        return self.forward_(extra_inputs)
+        return self.forward_(inputs, extra_inputs)
 
-    def forward_(self, extra_inputs=None):
+    def forward_(self, inputs=None, extra_inputs=None):
         assert self.config is not None, "Config is None."
         
         batch_size = 1 if extra_inputs is None else extra_inputs.shape[0]
         res_h, res_w = self.config.res_h, self.config.res_w
+        
+        if inputs is None:
+            inputs = type(self).constant_inputs
         
         if extra_inputs is not None:
             if len(extra_inputs.shape) == 1:
@@ -621,7 +625,7 @@ class CPPN():
                 # initialize the node's sum_inputs
                 if node.type == NodeType.INPUT:
                     if node_index < self.config.num_inputs:
-                        starting_input = type(self).constant_inputs[:,:,node_index].repeat(batch_size, 1, 1) # (batch_size, res_h, res_w)
+                        starting_input = inputs[:,:,node_index].repeat(batch_size, 1, 1) # (batch_size, res_h, res_w)
                     elif extra_inputs is not None:
                         # we want (batch_size, res_h, res_w)
                         this_idx = node_index - self.config.num_inputs
@@ -644,7 +648,7 @@ class CPPN():
         assert self.outputs.dtype == torch.float32, f"Output is {self.outputs.dtype}, should be float32"
         return self.outputs
     
-    def forward(self, extra_inputs=None):
+    def forward(self, inputs=None, extra_inputs=None):
         """Feeds forward the network."""
         
         assert self.config is not None, "Config is None."
@@ -652,8 +656,8 @@ class CPPN():
             # self.reset_grads()
             
             if not hasattr(self, 'aot_fn'):
-                def f(x):
-                    return self.forward_(extra_inputs=x) 
+                def f(x0, x1):
+                    return self.forward_(inputs=x0, extra_inputs=x1) 
                 def fw(f, inps):
                     return f
                 def bw(f, inps):
@@ -661,9 +665,9 @@ class CPPN():
                 
                 self.aot_fn = aot_function(f, fw_compiler=fw, bw_compiler=bw)
             
-            return self.aot_fn(extra_inputs)  
+            return self.aot_fn(inputs, extra_inputs)  
         else:  
-            return self.forward_(extra_inputs=extra_inputs)
+            return self.forward_(inputs=inputs, extra_inputs=extra_inputs)
 
     def backward(self, loss:torch.Tensor,retain_graph=False):
         """Backpropagates the error through the network."""
