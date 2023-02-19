@@ -58,6 +58,8 @@ class CPPN():
                 if use_bias:
                     this_pixel.append(torch.tensor(1.0)) # bias = 1.0
                 type.constant_inputs[y][x] = torch.tensor(this_pixel, dtype=torch.float32, device=device, requires_grad=False)
+        
+        return type.constant_inputs
 
     def __init__(self, config = None, nodes = None, connections = None) -> None:
         self.config = config
