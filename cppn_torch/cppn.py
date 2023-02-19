@@ -685,6 +685,7 @@ class CPPN():
         self.outputs = None # new image
         self.fitness= torch.tensor(self.fitness.detach().item())
         self.optimizer = None
+        del self.aot_fn
         
     
     def genetic_difference(self, other) -> float:
