@@ -675,15 +675,23 @@ class CPPN():
         self.outputs = None # new image
     
     def discard_grads(self):
+        self.reset_grads()
         for _, cx in self.connection_genome.items():
-            cx.weight = torch.tensor(cx.weight.detach().item())
+            # check nan
+            if torch.isnan(cx.weight).any():
+                # TODO: why NaN?
+                cx.weight = torch.tensor(0, device=self.device)
+            else:
+                cx.weight = torch.tensor(cx.weight.detach().item(), device=self.device)
             # if cx.weight.grad is not None:
                 # cx.weight.grad.zero_()
                 # cx.weight = torch.tensor(cx.weight.detach().item())
                 # cx.weight.requires_grad = False
                 # cx.weight.requires_grad = False
+                
+        self.reset_activations()
         self.outputs = None # new image
-        self.fitness= torch.tensor(self.fitness.detach().item())
+        self.fitness= torch.tensor(self.fitness.detach().item(), device=self.device)
         del self.optimizer
         self.optimizer = None
         del self.aot_fn
