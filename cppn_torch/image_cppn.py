@@ -153,7 +153,29 @@ class ImageCPPN(CPPN):
             # assume output is HSL and convert to RGB
             self.outputs = hsv2rgb(self.outputs) # convert to RGB
         
-        
+    @torch.no_grad()
+    def clone(self, deepcopy=True, cpu=False, new_id=False):
+        """ Create a copy of this genome. """
+        id = self.id if (not new_id) else self.__class__.get_id()
+        if deepcopy:
+            child = copy.deepcopy(self)
+            child.set_id(id)
+            if cpu:
+                child.to_cpu()
+            return child
+        child = self.__class__(self.config, {}, {})
+        child.connection_genome = {key: cx.copy() for key, cx in self.connection_genome.items()}        
+        child.node_genome = {key: node.copy() for key, node in self.node_genome.items()}
+        child.update_node_layers()
+        for cx in child.connection_genome.values():
+            # detach from current graph
+            has_grad = cx.weight.requires_grad
+            cx.weight = cx.weight.detach()
+            cx.weight = torch.tensor(cx.weight.item())#, requires_grad=has_grad)
+        if cpu:
+            child.to_cpu()
+        child.set_id(id)
+        return child
 if __name__ == '__main__':
     # run a test
     import matplotlib.pyplot as plt
