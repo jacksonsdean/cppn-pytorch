@@ -684,6 +684,7 @@ class CPPN():
                 # cx.weight.requires_grad = False
         self.outputs = None # new image
         self.fitness= torch.tensor(self.fitness.detach().item())
+        del self.optimizer
         self.optimizer = None
         del self.aot_fn
         
