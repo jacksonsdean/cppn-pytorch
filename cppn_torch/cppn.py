@@ -354,7 +354,7 @@ class CPPN():
 
     def mutate(self, rates=None):
         """Mutates the CPPN based on its config or the optionally provided rates."""
-        self.fitness, self.adjusted_fitness, self.novelty = torch.tensor(0.0,device=self.device), torch.tensor(0.0,device=self.device), torch.tensor(0.0,device=self.device) # new fitnesses after mutation
+        self.fitness, self.adjusted_fitness, self.novelty = torch.tensor(-torch.inf,device=self.device), torch.tensor(-torch.inf,device=self.device), torch.tensor(-torch.inf,device=self.device) # new fitnesses after mutation
         assert self.config is not None, "Config is None."
         if rates is None:
             add_node = self.config.prob_add_node
