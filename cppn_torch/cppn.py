@@ -185,7 +185,7 @@ class CPPN():
         self.outputs = None
         for cx in self.connection_genome.values():
             cx.weight = cx.weight.detach()
-            cx.weight = torch.nn.Parameter(torch.tensor(cx.weight.item(), requires_grad=True))
+            cx.weight = torch.nn.Parameter(torch.tensor(cx.weight.item(), requires_grad=True, dtype=torch.float32))
         self.optimizer = opt_class([cx.weight for cx in self.connection_genome.values()], lr=lr)
 
     def initialize_connection_genome(self):
@@ -688,7 +688,7 @@ class CPPN():
                 # TODO: why NaN?
                 cx.weight = torch.tensor(0, device=self.device)
             else:
-                cx.weight = torch.tensor(cx.weight.detach().item(), device=self.device)
+                cx.weight = torch.tensor(cx.weight.detach().item(), device=self.device, dtype=torch.float32)
             # if cx.weight.grad is not None:
                 # cx.weight.grad.zero_()
                 # cx.weight = torch.tensor(cx.weight.detach().item())
@@ -845,7 +845,7 @@ class CPPN():
             # detach from current graph
             has_grad = cx.weight.requires_grad
             cx.weight = cx.weight.detach()
-            cx.weight = torch.tensor(cx.weight.item()) # require prepare_optimizer() again
+            cx.weight = torch.tensor(cx.weight.item(), dtype=torch.float32) # require prepare_optimizer() again
         if cpu:
             child.to_cpu()
         child.set_id(id)

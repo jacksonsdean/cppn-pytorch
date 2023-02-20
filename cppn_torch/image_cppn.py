@@ -55,6 +55,7 @@ class ImageCPPN(CPPN):
             assert self.outputs is not None
             assert self.outputs.device == self.device, f"Image is on {self.outputs.device}, should be {self.device}"
             assert self.outputs.dtype == torch.float32, f"Image is {self.outputs.dtype}, should be float32"
+            
             return self.outputs
 
         if self.config.allow_recurrent:
