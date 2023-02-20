@@ -76,9 +76,9 @@ class CPPN():
         self.reconfig(self.config, nodes, connections)
         
         self.parents = (0, 0)
-        self.fitness = torch.tensor(0.0, device=self.device)
-        self.novelty = torch.tensor(0.0, device=self.device)
-        self.adjusted_fitness = torch.tensor(0.0, device=self.device)
+        self.fitness = torch.tensor(-torch.inf, device=self.device)
+        self.novelty = torch.tensor(-torch.inf, device=self.device)
+        self.adjusted_fitness = torch.tensor(-torch.inf, device=self.device)
     
     def reconfig(self, config = None, nodes = None, connections = None):
         if config is not None:
