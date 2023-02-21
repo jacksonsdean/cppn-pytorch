@@ -8,6 +8,7 @@ import os
 from typing import Callable, List
 from typing import Union
 import torch
+import networkx as nx
 
 from functorch.compile import compiled_function, draw_graph, aot_function
 from cppn_torch.activation_functions import identity
@@ -850,5 +851,15 @@ class CPPN():
             child.to_cpu()
         child.set_id(id)
         return child
+    
+    def to_networkx(self):
+        self.update_node_layers()
+        G = nx.DiGraph()
+        for key, node in self.node_genome.items():
+            G.add_node(key, layer=node.layer, activation=node.activation.__name__)
+        for key, cx in self.connection_genome.items():
+            G.add_edge(key[0], key[1], weight=cx.weight.item())
+        return G
+        
 
    
