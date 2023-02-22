@@ -50,15 +50,25 @@ class CPPN():
         type.constant_inputs = torch.zeros((res_h, res_w, n_inputs), dtype=torch.float32, device=device, requires_grad=False)
 
         # assign values:
-        for y in range(res_h):
-            for x in range(res_w):
-                this_pixel = [y_vals[y], x_vals[x]] # coordinates
-                if use_radial_dist:
-                    # d = sqrt(x^2 + y^2)
-                    this_pixel.append(torch.tensor(math.sqrt(y_vals[y]**2 + x_vals[x]**2)))
-                if use_bias:
-                    this_pixel.append(torch.tensor(1.0)) # bias = 1.0
-                type.constant_inputs[y][x] = torch.tensor(this_pixel, dtype=torch.float32, device=device, requires_grad=False)
+        type.constant_inputs[:, :, 0] = y_vals.unsqueeze(1).repeat(1, res_w)
+        type.constant_inputs[:, :, 1] = x_vals.unsqueeze(0).repeat(res_h, 1)
+        
+        if use_radial_dist:
+            # d = sqrt(x^2 + y^2)
+            type.constant_inputs[:, :, 2] = torch.sqrt(type.constant_inputs[:, :, 0]**2 + type.constant_inputs[:, :, 1]**2)
+        if use_bias:
+            type.constant_inputs[:, :, -1] = torch.ones((res_h, res_w), dtype=torch.float32, device=device, requires_grad=False) # bias = 1.0
+        
+        
+        # for y in range(res_h):
+        #     for x in range(res_w):
+        #         this_pixel = [y_vals[y], x_vals[x]] # coordinates
+        #         if use_radial_dist:
+        #             # d = sqrt(x^2 + y^2)
+        #             this_pixel.append(torch.tensor(math.sqrt(y_vals[y]**2 + x_vals[x]**2)))
+        #         if use_bias:
+        #             this_pixel.append(torch.tensor(1.0)) # bias = 1.0
+        #         type.constant_inputs[y][x] = torch.tensor(this_pixel, dtype=torch.float32, device=device, requires_grad=False)
         
         return type.constant_inputs
 
@@ -692,11 +702,6 @@ class CPPN():
                 cx.weight = torch.tensor(0, device=self.device)
             else:
                 cx.weight = torch.tensor(cx.weight.detach().item(), device=self.device, dtype=torch.float32)
-            # if cx.weight.grad is not None:
-                # cx.weight.grad.zero_()
-                # cx.weight = torch.tensor(cx.weight.detach().item())
-                # cx.weight.requires_grad = False
-                # cx.weight.requires_grad = False
                 
         self.reset_activations()
         self.outputs = None # new image
@@ -833,8 +838,13 @@ class CPPN():
         if hasattr(self, 'aot_fn'):
             # can't clone AOT functions
             del self.aot_fn
+        
+        
         id = self.id if (not new_id) else type(self).get_id()
         if deepcopy:
+            if self.fitness.requires_grad:
+                self.discard_grads()
+
             child = copy.deepcopy(self)
             child.set_id(id)
             if cpu:
