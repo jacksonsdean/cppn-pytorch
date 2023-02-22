@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cppn_torch"
-version = "0.0.16"
+version = "2023.0.17"
 description = "CPPN implementation in PyTorch"
 authors = [
     {name = "Jackson Dean", email = "jackson@downbeat.games"}
@@ -12,11 +12,8 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.6"
 license = {file = "LICENSE"}
-homepage = "https://github.com/jacksonsdean/cppn_torch"
-repository = "https://github.com/jacksonsdean/cppn_torch"
 keywords = ["cppn", "neural networks", "pytorch", "neuroevolution"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Education",
     "Intended Audience :: Science/Research",
@@ -28,7 +25,11 @@ classifiers = [
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "Topic :: Scientific/Engineering :: Image Recognition",
-    "Topic :: Scientific/Engineering :: Visualization",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
+
+
+[project.urls]
+homepage = "https://github.com/jacksonsdean/cppn_torch"
+repository = "https://github.com/jacksonsdean/cppn_torch"
+bug_tracker = "https://github.com/jacksonsdean/cppn_torch/issues"
