@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools", "wheel", "torch", "numpy", "matplotlib", "scipy", "scikit-image", "functorch", "tqdm", "torchvision", "piq", "imageio","scikits-bootstrap", "networkx"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cppn_torch"
+version = "0.0.16"
+description = "CPPN implementation in PyTorch"
+authors = [
+    {name = "Jackson Dean", email = "jackson@downbeat.games"}
+]
+readme = "README.md"
+requires-python = ">=3.6"
+license = {file = "LICENSE"}
+homepage = "https://github.com/jacksonsdean/cppn_torch"
+repository = "https://github.com/jacksonsdean/cppn_torch"
+keywords = ["cppn", "neural networks", "pytorch", "neuroevolution"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
