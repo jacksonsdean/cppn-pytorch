@@ -165,10 +165,11 @@ class ImageCPPN(CPPN):
             # assume output is HSL and convert to RGB
             self.outputs = hsv2rgb(self.outputs) # convert to RGB
     
-    # def __deepcopy__(self, memo):
-    #     """Deep copy the network"""
-    #     return super().__deepcopy__(memo)
         
+    def __call__(self, inputs=None, force_recalculate=False, override_h=None, override_w=None, extra_inputs=None, no_aot=True):
+        return self.get_image(inputs=inputs, force_recalculate=force_recalculate, override_h=override_h, override_w=override_w, extra_inputs=extra_inputs, no_aot=no_aot)
+    
+    
 if __name__ == '__main__':
     # run a test
     import matplotlib.pyplot as plt
