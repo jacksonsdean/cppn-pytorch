@@ -62,10 +62,11 @@ class CPPN():
         
         return type.constant_inputs
 
-    def __init__(self, config = None, nodes = None, connections = None) -> None:
+    def __init__(self, config = Config(), nodes = None, connections = None) -> None:
+        """Initialize a CPPN."""
         self.config = config
-        if self.config is None:
-            self.config = Config()
+            
+        assert self.config is not None
             
         self.outputs = None
         self.node_genome = {}
@@ -80,6 +81,7 @@ class CPPN():
         self.fitness = torch.tensor(-torch.inf, device=self.device)
         self.novelty = torch.tensor(-torch.inf, device=self.device)
         self.adjusted_fitness = torch.tensor(-torch.inf, device=self.device)
+        
     
     def reconfig(self, config = None, nodes = None, connections = None):
         if config is not None:
@@ -99,7 +101,7 @@ class CPPN():
         if self.config.use_input_bias:
             self.n_inputs+=1 # x, y, d?, bias
 
-        self.config.num_inputs = self.n_inputs # TODO not sure
+        # self.config.num_inputs = self.n_inputs # TODO not sure
         self.n_outputs = len(self.config.color_mode) # RGB (3), HSV(3), L(1)
 
         if nodes is None:
@@ -110,7 +112,7 @@ class CPPN():
             self.initialize_connection_genome()
         else:
             self.connection_genome = connections
-            
+        
         self.config._not_dirty()
     
     @staticmethod

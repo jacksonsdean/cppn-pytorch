@@ -4,12 +4,13 @@ from typing import List
 import torch
 from functorch.compile import compiled_function, draw_graph, aot_function
 
+from cppn_torch.config import CPPNConfig as Config
 from cppn_torch import CPPN
 from cppn_torch.gene import NodeType
 from cppn_torch.graph_util import feed_forward_layers, find_node_with_id, get_incoming_connections, hsv2rgb
 
 class ImageCPPN(CPPN):
-    def __init__(self, config=None, nodes=None, connections=None) -> None:
+    def __init__(self, config=Config(), nodes=None, connections=None) -> None:
         super().__init__(config, nodes, connections)
    
     @property
