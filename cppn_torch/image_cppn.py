@@ -53,7 +53,8 @@ class ImageCPPN(CPPN):
         if not recalculate:
             # return the cached image
             assert self.outputs is not None
-            assert self.outputs.device == self.device, f"Image is on {self.outputs.device}, should be {self.device}"
+            assert str(self.outputs.device) == str(self.device), f"Output is on {self.outputs.device}, should be {self.device}"
+            
             assert self.outputs.dtype == torch.float32, f"Image is {self.outputs.dtype}, should be float32"
             
             return self.outputs
@@ -122,7 +123,8 @@ class ImageCPPN(CPPN):
         assert inputs.shape[0] == res_h
         assert inputs.shape[1] == res_w
         assert inputs.shape[2] == self.config.num_inputs
-        assert inputs.device == self.device
+        assert str(inputs.device) == str(self.device), f"Inputs are on {inputs.device}, should be {self.device}"
+        
             
         # evaluate CPPN
         self.outputs = super().forward_(inputs=inputs, extra_inputs=extra_inputs)
