@@ -846,10 +846,10 @@ class CPPN():
             in_node, out_node = cx.key
             id_arr[i, 0] = in_node
             id_arr[i, 1] = out_node
-            act_arr[i, 0] = activation_idx[str(in_node.activation)]
-            act_arr[i, 1] = activation_idx[str(out_node.activation)]
-            types_arr[i, 0] = int(in_node.type)
-            types_arr[i, 1] = int(out_node.type)
+            act_arr[i, 0] = activation_idx[str(self.node_genome[in_node].activation)]
+            act_arr[i, 1] = activation_idx[str(self.node_genome[out_node].activation)]
+            types_arr[i, 0] = int(self.node_genome[in_node].type)
+            types_arr[i, 1] = int(self.node_genome[out_node].type)
             weight_arr[i] = cx.weight
         with open(path, 'wb') as f:
             np.savez_compressed(f, version=version, weight_arr=weight_arr, id_arr=id_arr, act_arr=act_arr, types_arr=types_arr)
