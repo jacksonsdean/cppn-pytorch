@@ -12,6 +12,8 @@ from cppn_torch.graph_util import name_to_fn
 
 class CPPNConfig:
     """Stores configuration parameters for the CPPN."""
+    version = [0, 1, 0]
+    
     # pylint: disable=too-many-instance-attributes
     def __init__(self) -> None:
         # Initialize to default values

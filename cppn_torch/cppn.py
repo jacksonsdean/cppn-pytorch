@@ -840,28 +840,36 @@ class CPPN():
         act_arr = np.zeros((len(list(self.enabled_connections())), 2), dtype=np.int8)
         types_arr = np.zeros((len(list(self.enabled_connections())), 2), dtype=np.int8)
         activation_idx = {str(act): i for i, act in enumerate(self.config.activations)}
+        version = np.array(self.config.version, dtype=np.int8)
         
         for i, cx in enumerate(self.enabled_connections()):
-            id_arr[i, 0] = cx.in_node
-            id_arr[i, 1] = cx.out_node
-            act_arr[i, 0] = activation_idx[str(cx.in_node.activation)]
-            act_arr[i, 1] = activation_idx[str(cx.out_node.activation)]
-            types_arr[i, 0] = int(cx.in_node.type)
-            types_arr[i, 1] = int(cx.out_node.type)
+            in_node, out_node = cx.key
+            id_arr[i, 0] = in_node
+            id_arr[i, 1] = out_node
+            act_arr[i, 0] = activation_idx[str(in_node.activation)]
+            act_arr[i, 1] = activation_idx[str(out_node.activation)]
+            types_arr[i, 0] = int(in_node.type)
+            types_arr[i, 1] = int(out_node.type)
             weight_arr[i] = cx.weight
         with open(path, 'wb') as f:
-            np.savez_compressed(f, weight_arr=weight_arr, id_arr=id_arr, act_arr=act_arr, types_arr=types_arr)
+            np.savez_compressed(f, version=version, weight_arr=weight_arr, id_arr=id_arr, act_arr=act_arr, types_arr=types_arr)
         
     def decompress(self, path):
         """Load the genome from a compressed numpy file."""
         assert os.path.exists(path), f"Path {path} does not exist"
         loaded = np.load(path)
+        version = loaded['version']
         weight_arr = loaded['weight_arr']
         id_arr = loaded['id_arr']
         act_arr = loaded['act_arr']
         types_arr = loaded['types_arr']
         idx_activation = {i: act for i, act in enumerate(self.config.activations)}
         
+        if version.tolist() != self.config.version:
+            print(f"WARNING: Version mismatch. Expected {self.config.version}, got {version.tolist()}")
+            print("Uncompressed file may not be compatible with current configuration.")
+            print(f"Use CPPN version {version.tolist()} for compatibility.")
+            
         self.node_genome= {}
         self.connection_genome = {}
         
