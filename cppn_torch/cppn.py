@@ -108,14 +108,20 @@ class CPPN():
             raise ValueError("device is None") # TODO
             # no device specified, try to use GPU
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            
-        n_inputs = self.config.num_inputs # e.g. x, y, etc
-        if self.config.use_radial_distance:
-            n_inputs += 1 # x, y, d
-        if self.config.use_input_bias:
-            n_inputs+=1 # x, y, d?, bias
 
-        self.config.num_inputs = n_inputs
+
+        # TODO: I have to make a decision about whether the user has to specify the exact number of inputs or not      
+        # could be that they say 2 for x,y and we add radial_distance and bias automatically
+        # for now, make them specify everything
+        
+        # alternative:
+        # n_inputs = 2 # e.g. x, y
+        # if self.config.use_radial_distance:
+        #     n_inputs += 1 # x, y, d
+        # if self.config.use_input_bias:
+        #     n_inputs+=1 # x, y, d?, bias
+        # self.config.num_inputs = n_inputs
+        
         self.n_outputs = len(self.config.color_mode) # RGB: 3, HSV: 3, L: 1
 
         if nodes is None:
