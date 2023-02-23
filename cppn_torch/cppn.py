@@ -872,16 +872,16 @@ class CPPN():
             
         self.node_genome= {}
         self.connection_genome = {}
-        
+        cx_id = 0
         for ids, acts, weight in zip(id_arr, act_arr, weight_arr):
             in_node, out_node = ids
             act_in, act_out = acts
             if in_node not in self.node_genome:
-                self.node_genome[in_node] = Node(in_node, idx_activation[act_in], types_arr[in_node])
+                self.node_genome[in_node] = Node(in_node, idx_activation[act_in], types_arr[cx_id][0])
             if out_node not in self.node_genome:
-                self.node_genome[out_node] = Node(out_node, idx_activation[act_out], types_arr[out_node])
+                self.node_genome[out_node] = Node(out_node, idx_activation[act_out], types_arr[cx_id][1])
             self.connection_genome[(in_node, out_node)] = Connection((in_node, out_node), torch.tensor(weight, dtype=torch.float32, device=self.device))
-        
+            cx_id += 1
             
     def to_cpu(self):
         '''Move all tensors to CPU'''
