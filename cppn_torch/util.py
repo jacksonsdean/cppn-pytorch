@@ -315,7 +315,7 @@ def get_max_number_of_hidden_nodes(population):
 def get_avg_number_of_hidden_nodes(population):
     count = 0
     for g in population:
-        count+=len(g.node_genome) - g.n_inputs - g.n_outputs
+        count+=len(g.node_genome) - g.config.num_inputs - g.n_outputs
     return count/len(population)
 
 def get_max_number_of_connections(population):
