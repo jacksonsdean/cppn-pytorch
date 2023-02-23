@@ -149,7 +149,7 @@ class ImageCPPN(CPPN):
         return self.outputs
     
     def normalize_image(self):
-        """Normalize from outputs (any range) to 0 through 255 and convert to ints"""
+        """Normalize from outputs (any range) to 0 through 1"""
         assert self.outputs is not None, "No image to normalize"
         assert self.outputs.dtype == torch.float32, f"Image is not float32, is {self.outputs.dtype}"
         assert str(self.outputs.device) == str(self.device), f"Image is on {self.outputs.device}, should be {self.device}"
