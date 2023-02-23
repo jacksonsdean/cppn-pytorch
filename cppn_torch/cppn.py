@@ -38,13 +38,22 @@ class CPPN():
     
     
     @staticmethod
-    def initialize_inputs(res_h, res_w, use_radial_dist, use_bias, n_inputs, device, coord_range=(-.5,.5),type=None ):
+    def initialize_inputs(res_h, res_w, use_radial_dist, use_bias, n_inputs, device, coord_range=(-.5,.5), type=None):
         """Initializes the pixel inputs."""
         if type is None:
             type = __class__
+        
+        if not isinstance(coord_range[0], tuple):
+            # assume it's a single range for both x and y
+            coord_range_x = coord_range
+            coord_range_y = coord_range
+        else:
+            coord_range_x, coord_range_y = coord_range
+            
+            
         # Pixel coordinates are linear within coord_range
-        x_vals = torch.linspace(coord_range[0], coord_range[1], res_w, device=device,dtype=torch.float32)
-        y_vals = torch.linspace(coord_range[0], coord_range[1], res_h, device=device,dtype=torch.float32)
+        x_vals = torch.linspace(coord_range_x[0], coord_range_x[1], res_w, device=device,dtype=torch.float32)
+        y_vals = torch.linspace(coord_range_y[0], coord_range_y[1], res_h, device=device,dtype=torch.float32)
 
         # initialize to 0s
         type.constant_inputs = torch.zeros((res_h, res_w, n_inputs), dtype=torch.float32, device=device, requires_grad=False)
@@ -59,16 +68,6 @@ class CPPN():
         if use_bias:
             type.constant_inputs[:, :, -1] = torch.ones((res_h, res_w), dtype=torch.float32, device=device, requires_grad=False) # bias = 1.0
         
-        
-        # for y in range(res_h):
-        #     for x in range(res_w):
-        #         this_pixel = [y_vals[y], x_vals[x]] # coordinates
-        #         if use_radial_dist:
-        #             # d = sqrt(x^2 + y^2)
-        #             this_pixel.append(torch.tensor(math.sqrt(y_vals[y]**2 + x_vals[x]**2)))
-        #         if use_bias:
-        #             this_pixel.append(torch.tensor(1.0)) # bias = 1.0
-        #         type.constant_inputs[y][x] = torch.tensor(this_pixel, dtype=torch.float32, device=device, requires_grad=False)
         
         return type.constant_inputs
 
