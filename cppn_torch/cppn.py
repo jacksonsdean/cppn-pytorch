@@ -100,6 +100,8 @@ class CPPN():
         if config is not None:
             self.config = config
         assert self.config is not None
+        
+        self.discard_grads()
      
         self.device = self.config.device
         torch.manual_seed(self.config.seed)
