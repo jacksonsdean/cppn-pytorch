@@ -22,7 +22,8 @@ class ImageCPPN(CPPN):
             Extra inputs are (batch_size, num_extra_inputs)
         """
         assert self.config is not None, "Config is None."
-        
+        if self.config.dirty:
+            self.reconfig()
         # apply size override
         if self.config.dirty:
             raise RuntimeError("config is dirty, did you forget to call .reconfig() after changing config?")
