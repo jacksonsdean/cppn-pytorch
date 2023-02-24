@@ -37,6 +37,7 @@ class CPPNConfig:
         self.init_connection_probability = 0.85
         self.activations = get_all()
         self.normalize_outputs = True
+        self.node_agg = 'sum'
         
         self.genome_type = None # default to CPPN
         

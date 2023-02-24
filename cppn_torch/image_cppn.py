@@ -143,11 +143,18 @@ class ImageCPPN(CPPN):
         
         if self.config.normalize_outputs:
             self.normalize_image()
+        else:
+            self.clamp_image()
         
         assert str(self.outputs.device)== str(self.device), f"Image is on {self.outputs.device}, should be {self.device}"
         assert self.outputs.dtype == torch.float32, f"Image is {self.outputs.dtype}, should be float32"
         return self.outputs
     
+    def clamp_image(self):
+        assert self.outputs is not None, "No image to clamp"
+        assert self.outputs.dtype == torch.float32, f"Image is not float32, is {self.outputs.dtype}"
+        self.outputs = torch.clamp(self.outputs, 0, 1)
+            
     def normalize_image(self):
         """Normalize from outputs (any range) to 0 through 1"""
         assert self.outputs is not None, "No image to normalize"

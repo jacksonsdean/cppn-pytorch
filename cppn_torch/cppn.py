@@ -784,6 +784,9 @@ class CPPN():
 
     def crossover(self, other):
         """ Configure a new genome by crossover from two parent genomes. """
+        
+        # TODO: this may mess up the order of the outputs, need to check
+        
         child = CPPN(self.config, {}, {}) # create an empty child genome
         assert self.fitness is not None, "Parent 1 has no fitness"
         assert other.fitness is not None, "Parent 2 has no fitness"
@@ -822,6 +825,7 @@ class CPPN():
 
         child.parents = (parent1.id, parent2.id)
         child.update_node_layers()
+        
         return child
 
     def save(self, path):
@@ -870,19 +874,25 @@ class CPPN():
             print("Uncompressed file may not be compatible with current configuration.")
             print(f"Use CPPN version {version.tolist()} for compatibility.")
             
-        self.node_genome= {}
+        self.node_genome = {}
+        nodes = []
         self.connection_genome = {}
         cx_id = 0
         for ids, acts, weight in zip(id_arr, act_arr, weight_arr):
             in_node, out_node = ids
             act_in, act_out = acts
             if in_node not in self.node_genome:
-                self.node_genome[in_node] = Node(in_node, idx_activation[act_in], types_arr[cx_id][0])
+                nodes = Node(in_node, idx_activation[act_in], types_arr[cx_id][0])
             if out_node not in self.node_genome:
                 self.node_genome[out_node] = Node(out_node, idx_activation[act_out], types_arr[cx_id][1])
             self.connection_genome[(in_node, out_node)] = Connection((in_node, out_node), torch.tensor(weight, dtype=torch.float32, device=self.device))
             cx_id += 1
             
+        # BIG WARN: Only works in python 3.7+
+        # self.node_genome = dict(sorted(self.node_genome.items(), reverse=True))
+        
+        self.update_node_layers()
+        
     def to_cpu(self):
         '''Move all tensors to CPU'''
         self.device = torch.device('cpu')

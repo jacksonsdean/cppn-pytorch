@@ -69,6 +69,7 @@ class Node(Gene):
         self.layer = _layer
         self.sum_inputs = None
         self.outputs = None
+        self.agg = 'sum'
         super().__init__()
     
     @property
@@ -86,12 +87,24 @@ class Node(Gene):
 
     def activate(self, incoming_connections, nodes):
         """Activates the node given a list of connections that end here."""
-        for cx in incoming_connections:
-            if nodes[cx.key[0]] is not None:
-                inputs = torch.mul(nodes[cx.key[0]].outputs, cx.weight)
-                self.sum_inputs = self.sum_inputs + inputs
-        if not isinstance(self.sum_inputs, torch.Tensor):
-            self.sum_inputs = torch.tensor([self.sum_inputs], device=incoming_connections[0].weight.device)
+        weights = torch.stack([cx.weight for cx in incoming_connections])
+        inputs = torch.stack([nodes[cx.key[0]].outputs for cx in incoming_connections])
+        self.sum_inputs = torch.mul(inputs, weights)
+        if self.agg == 'sum':
+            self.sum_inputs = torch.sum(self.sum_inputs, dim=0)
+        elif self.agg == 'mean':
+            self.sum_inputs = torch.mean(self.sum_inputs, dim=0)
+        elif self.agg == 'max':
+            self.sum_inputs = torch.max(self.sum_inputs, dim=0)
+        elif self.agg == 'min':
+            self.sum_inputs = torch.min(self.sum_inputs, dim=0)
+        
+        # for cx in incoming_connections:
+            # if nodes[cx.key[0]] is not None:
+                # inputs = torch.mul(nodes[cx.key[0]].outputs, cx.weight)
+                # self.sum_inputs = self.sum_inputs + inputs
+        # if not isinstance(self.sum_inputs, torch.Tensor):
+            # self.sum_inputs = torch.tensor([self.sum_inputs], device=incoming_connections[0].weight.device)
         
         assert isinstance(self.activation, Callable), "activation function is not a function"
         self.outputs = self.activation(self.sum_inputs)  # apply activation
@@ -188,6 +201,6 @@ class Connection(Gene):
     def __str__(self):
         return self.__repr__()
     def __repr__(self):
-        return f"([{self.key[0]}->{self.key[1]}]"+\
-            f"W:{self.weight:3f} E:{self.enabled} R:{self.is_recurrent})"
+        return f"([{self.key[0]}->{self.key[1]}] "+\
+            f"W:{self.weight:3f} E:{int(self.enabled)} R:{int(self.is_recurrent)})"
 
