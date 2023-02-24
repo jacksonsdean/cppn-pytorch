@@ -23,6 +23,7 @@ class ImageCPPN(CPPN):
         """
         assert self.config is not None, "Config is None."
         if self.config.dirty:
+            self.discard_grads()
             self.reconfig()
         # apply size override
         if self.config.dirty:

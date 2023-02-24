@@ -100,8 +100,6 @@ class CPPN():
         if config is not None:
             self.config = config
         assert self.config is not None
-        
-        self.discard_grads()
      
         self.device = self.config.device
         torch.manual_seed(self.config.seed)
@@ -704,7 +702,7 @@ class CPPN():
                 
         self.reset_activations()
         self.outputs = None # new image
-        self.fitness= torch.tensor(self.fitness.detach().item(), device=self.device)
+        self.fitness = torch.tensor(self.fitness.detach().item(), device=self.device)
         if hasattr(self, 'optimizer'):
             del self.optimizer
             self.optimizer = None
