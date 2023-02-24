@@ -85,17 +85,22 @@ class Node(Gene):
         if self.outputs is not None:
             self.outputs = self.outputs.cpu()
 
-    def activate(self, incoming_connections, nodes):
+    def activate(self, X, W):
         """Activates the node given a list of connections that end here."""
         assert isinstance(self.activation, Callable), "activation function is not a function"
-        
-        if len(incoming_connections) == 0:
-            self.outputs = self.activation(self.sum_inputs)
+        if X is None:
+            return
+        if W is None:
+            self.outputs = self.activation(X)
             return
 
-        weights = torch.stack([cx.weight for cx in incoming_connections])
-        inputs = torch.stack([nodes[cx.key[0]].outputs for cx in incoming_connections])
-        self.sum_inputs = torch.mul(inputs, weights)
+        X_shape = X.shape[1:]
+        X = X.reshape(X.shape[0], -1)
+        self.sum_inputs = torch.matmul(W, X)
+        self.sum_inputs = self.sum_inputs.reshape(-1, *X_shape)
+
+        
+        # aggregate inputs
         if self.agg == 'sum':
             self.sum_inputs = torch.sum(self.sum_inputs, dim=0)
         elif self.agg == 'mean':
@@ -104,13 +109,8 @@ class Node(Gene):
             self.sum_inputs = torch.max(self.sum_inputs, dim=0)
         elif self.agg == 'min':
             self.sum_inputs = torch.min(self.sum_inputs, dim=0)
-        
-        # for cx in incoming_connections:
-            # if nodes[cx.key[0]] is not None:
-                # inputs = torch.mul(nodes[cx.key[0]].outputs, cx.weight)
-                # self.sum_inputs = self.sum_inputs + inputs
-        # if not isinstance(self.sum_inputs, torch.Tensor):
-            # self.sum_inputs = torch.tensor([self.sum_inputs], device=incoming_connections[0].weight.device)
+        else:
+            raise ValueError(f"Unknown aggregation function {self.agg}")
         
         self.outputs = self.activation(self.sum_inputs)  # apply activation
 

@@ -6,6 +6,7 @@ import sys
 from typing import Callable
 import imageio as iio
 import torch
+import typing
 
 from cppn_torch.activation_functions import *
 from cppn_torch.graph_util import name_to_fn
@@ -116,6 +117,16 @@ class CPPNConfig:
         """Applies an experimental condition to the configuration."""
         setattr(self, key, value)
         
+    def set_res(self, *res):
+        """Sets the resolution of the output image."""
+        if len(res) == 1:
+            self.res_w = res[0]
+            self.res_h = res[0]
+        else:
+            self.res_w = res[0]
+            self.res_h = res[1]
+        
+    
     #################    
     # Serialization #
     #################
@@ -209,7 +220,7 @@ class CPPNConfig:
         """Creates a configuration from a json string."""
         if isinstance(json_str, str):
             json_str = json.loads(json_str)
-        config = Config()
+        config = CPPNConfig()
         for key, value in json_str.items():
             setattr(config, key, value)
         config.strings_to_fns()

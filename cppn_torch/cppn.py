@@ -609,11 +609,9 @@ class CPPN():
                 cx.weight.grad.zero_()
     
             
-    def eval(self, inputs, extra_inputs=None):
+    def eval(self, inputs):
         """Evaluates the CPPN."""
         raise NotImplementedError("Use forward() instead.")
-        self.set_inputs(inputs)
-        return self.forward_(inputs, extra_inputs)
 
     def forward_(self, inputs=None, extra_inputs=None):
         assert self.config is not None, "Config is None."
@@ -621,17 +619,13 @@ class CPPN():
         batch_size = 1 if extra_inputs is None else extra_inputs.shape[0]
         res_h, res_w = self.config.res_h, self.config.res_w
         
+        assert isinstance(batch_size, int), "Batch size must be an integer."
+        assert isinstance(res_h, int), "Res h must be an integer."
+        assert isinstance(res_w, int), "Res w must be an integer."
+        
         if inputs is None:
             inputs = type(self).constant_inputs
-        
-        if extra_inputs is not None:
-            if len(extra_inputs.shape) == 1:
-                raise RuntimeError("Extra inputs must be (batch_size, num_extra_inputs)")
-            if len(extra_inputs.shape) == 2:
-                # repeat for the whole image
-                # we want (batch_size, res_h, res_w, num_extra_inputs)
-                extra_inputs = extra_inputs.unsqueeze(1).unsqueeze(2).repeat(1, res_h, res_w, 1)
-            
+
         # reset the activations to 0 before evaluating
         self.reset_activations()
         
@@ -639,34 +633,27 @@ class CPPN():
         layers = feed_forward_layers(self) 
         layers.insert(0, self.input_nodes().keys()) # add input nodes as first layer
         
-        starting_input = None
         for layer in layers:
             # iterate over layers
             for node_index, node_id in enumerate(layer):
                 # iterate over nodes in layer
-                node = find_node_with_id(self.node_genome, node_id) # the current node
-
-                # find incoming connections
-                node_inputs = get_incoming_connections(self, node)
-
-                # initialize the node's sum_inputs
+                node = self.node_genome[node_id] # the current node
+                
                 if node.type == NodeType.INPUT:
-                    if node_index < self.config.num_inputs:
-                        starting_input = inputs[:,:,node_index].repeat(batch_size, 1, 1) # (batch_size, res_h, res_w)
-                    elif extra_inputs is not None:
-                        # we want (batch_size, res_h, res_w)
-                        this_idx = node_index - self.config.num_inputs
-                        starting_input = extra_inputs[:,:,:, this_idx]
+                    # initialize the node's sum
+                    X = inputs[:,:,node_index].repeat(batch_size, 1, 1) # (batch_size, res_h, res_w)
+                    weights = None
                 else:
-                    # not an input node
-                    starting_input = torch.zeros((batch_size, res_h, res_w), dtype=torch.float32, device=self.device)
-
-                node.initialize_sum(starting_input)
-                # initialize the sum_inputs for this node
-                node.activate(node_inputs, self.node_genome)
+                    # find incoming connections and activate
+                    X, weights = get_incoming_connections_weights(self, node)
+                    if X is None:
+                        X = torch.zeros((batch_size, res_h, res_w), dtype=torch.float32, device=self.device)
+                
+                node.activate(X, weights)
 
         # collect outputs from the last layer
-        outputs = torch.stack([node.outputs for node in self.output_nodes().values()])
+        sorted_o = sorted(self.output_nodes().values(), key=lambda x: x.key, reverse=True)
+        outputs = torch.stack([node.outputs for node in sorted_o])
         assert str(outputs.device) == str(self.device), f"Output is on {outputs.device}, should be {self.device}"
 
         self.outputs = outputs
@@ -676,12 +663,10 @@ class CPPN():
         return self.outputs
     
     def forward(self, inputs=None, extra_inputs=None, no_aot=True):
-        """Feeds forward the network."""
+        """Feeds forward the network. A wrapper for forward_() that allows for AOT compilation."""
         
         assert self.config is not None, "Config is None."
         if self.config.with_grad and not no_aot:
-            # self.reset_grads()
-            
             if not hasattr(self, 'aot_fn'):
                 def f(x0, x1):
                     return self.forward_(inputs=x0, extra_inputs=x1) 

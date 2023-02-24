@@ -1,6 +1,5 @@
 """Contains utility functions"""
 import inspect
-import random
 import sys
 from typing import Callable
 import torch
@@ -52,7 +51,7 @@ def name_to_fn(name):
 
 def choose_random_function(config) -> Callable:
     """Chooses a random activation function from the activation function module."""
-    random_fn = random.choice(config.activations)
+    random_fn = config.activations[torch.randint(0, len(config.activations), (1,))[0]]
     return random_fn
 
 
@@ -128,6 +127,14 @@ def get_incoming_connections(individual, node):
     return list(filter(lambda x, n=node: x.key[1] == n.id,
                individual.enabled_connections()))  # cxs that end here
 
+def get_incoming_connections_weights(individual, node):
+    """Given an individual and a node, returns the connections in individual that end at the node"""
+    cxs = list(filter(lambda x, n=node: x.key[1] == n.id, individual.enabled_connections())) 
+    if len(cxs) == 0:
+        return None, None
+    weights = torch.stack([cx.weight for cx in cxs]).to(individual.device)
+    inputs = torch.stack([individual.node_genome[c.key[0]].outputs for c in cxs]).to(individual.device)
+    return inputs, weights
 
 
 def hsv2rgb(hsv):
