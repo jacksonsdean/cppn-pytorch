@@ -87,6 +87,12 @@ class Node(Gene):
 
     def activate(self, incoming_connections, nodes):
         """Activates the node given a list of connections that end here."""
+        assert isinstance(self.activation, Callable), "activation function is not a function"
+        
+        if len(incoming_connections) == 0:
+            self.outputs = self.activation(self.sum_inputs)
+            return
+
         weights = torch.stack([cx.weight for cx in incoming_connections])
         inputs = torch.stack([nodes[cx.key[0]].outputs for cx in incoming_connections])
         self.sum_inputs = torch.mul(inputs, weights)
@@ -106,7 +112,6 @@ class Node(Gene):
         # if not isinstance(self.sum_inputs, torch.Tensor):
             # self.sum_inputs = torch.tensor([self.sum_inputs], device=incoming_connections[0].weight.device)
         
-        assert isinstance(self.activation, Callable), "activation function is not a function"
         self.outputs = self.activation(self.sum_inputs)  # apply activation
 
     def initialize_sum(self, initial_sum):
