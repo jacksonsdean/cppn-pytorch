@@ -93,7 +93,9 @@ class Node(Gene):
         if W is None:
             self.outputs = self.activation(X)
             return
-
+        
+        X = X.permute(1, 0, 2, 3) # (num_incoming, batch_size, ...)
+        
         if self.agg == 'sum':
             # self.sum_inputs = torch.matmul(W, X) # slower for small matrices (?)
             for x, w in zip(X, W):
