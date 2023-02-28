@@ -62,14 +62,14 @@ class Node(Gene):
         """Returns an empty node. Default activation function is identity."""
         return Node(0, identity, NodeType.HIDDEN, 0)
 
-    def __init__(self, key, activation=None, _type=2, _layer=999) -> None:
+    def __init__(self, key, activation=None, _type=2, _layer=999, node_agg="sum") -> None:
         self.activation = activation
         self.id = key
         self.type = _type
         self.layer = _layer
         self.sum_inputs = None
         self.outputs = None
-        self.agg = 'sum'
+        self.agg = node_agg
         super().__init__()
     
     @property
@@ -94,24 +94,28 @@ class Node(Gene):
             self.outputs = self.activation(X)
             return
 
-        X_shape = X.shape[1:]
-        X = X.reshape(X.shape[0], -1)
-        self.sum_inputs = torch.matmul(W, X)
-        self.sum_inputs = self.sum_inputs.reshape(-1, *X_shape)
-
-        
-        # aggregate inputs
         if self.agg == 'sum':
-            self.sum_inputs = torch.sum(self.sum_inputs, dim=0)
-        elif self.agg == 'mean':
-            self.sum_inputs = torch.mean(self.sum_inputs, dim=0)
-        elif self.agg == 'max':
-            self.sum_inputs = torch.max(self.sum_inputs, dim=0)
-        elif self.agg == 'min':
-            self.sum_inputs = torch.min(self.sum_inputs, dim=0)
+            # self.sum_inputs = torch.matmul(W, X) # slower for small matrices (?)
+            for x, w in zip(X, W):
+                self.sum_inputs += x*w
+            
         else:
-            raise ValueError(f"Unknown aggregation function {self.agg}")
-        
+            X_shape = X.shape[1:]
+            X = X.reshape(X.shape[0], -1)
+            W = W.unsqueeze(1) # reshape for broadcasting
+            weighted_x = torch.mul(W, X)
+            
+            if self.agg == 'mean':
+                self.sum_inputs = weighted_x.mean(dim=0)
+            elif self.agg == 'max':
+                self.sum_inputs = weighted_x.max(dim=0)[0]
+            elif self.agg == 'min':
+                self.sum_inputs = weighted_x.min(dim=0)[0] 
+            else:
+                raise ValueError(f"Unknown aggregation function {self.agg}")
+            
+            self.sum_inputs = self.sum_inputs.reshape(X_shape) # reshape back to original shape
+            
         self.outputs = self.activation(self.sum_inputs)  # apply activation
 
     def initialize_sum(self, initial_sum):

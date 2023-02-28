@@ -22,16 +22,14 @@ class ImageCPPN(CPPN):
             Extra inputs are (batch_size, num_extra_inputs)
         """
         assert self.config is not None, "Config is None."
-        if self.config.dirty:
-            self.discard_grads()
-            self.reconfig()
-        # apply size override
+
         if self.config.dirty:
             raise RuntimeError("config is dirty, did you forget to call .reconfig() after changing config?")
        
         if not extra_inputs is None:
             assert extra_inputs.shape[-1] == self.config.num_extra_inputs, f"Wrong number of extra inputs {extra_inputs.shape[-1]} != {self.config.num_extra_inputs}"
         
+        # apply size override
         if override_h is not None:
             self.config.res_h = override_h
         if override_w is not None:

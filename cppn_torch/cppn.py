@@ -165,7 +165,7 @@ class CPPN():
         total_node_count = n_in + n_out + self.config.hidden_nodes_at_start
         
         for idx in range(n_in):
-            new_node = Node(-(1+idx), identity, NodeType.INPUT, 0)
+            new_node = Node(-(1+idx), identity, NodeType.INPUT, 0, self.config.node_agg)
             self.node_genome[new_node.key] = new_node
             
         for idx in range(n_in, n_in + n_out):
@@ -173,12 +173,12 @@ class CPPN():
                 output_fn = choose_random_function(self.config)
             else:
                 output_fn = self.config.output_activation
-            new_node = Node(-(1+idx), output_fn, NodeType.OUTPUT, 2)
+            new_node = Node(-(1+idx), output_fn, NodeType.OUTPUT, 2, self.config.node_agg)
             self.node_genome[new_node.key] = new_node
             
         for _ in range(n_in + n_out, total_node_count):
             new_node = Node(self.get_new_node_id(), choose_random_function(self.config),
-                            NodeType.HIDDEN, 1)
+                            NodeType.HIDDEN, 1, self.config.node_agg)
             self.node_genome[new_node.key] = new_node
      
      
@@ -464,7 +464,7 @@ class CPPN():
 
         # create the new node
         new_node = Node(self.get_new_node_id(), choose_random_function(self.config),
-                        NodeType.HIDDEN, 999)
+                        NodeType.HIDDEN, 999, self.config.node_agg)
         
         assert new_node.id not in self.node_genome.keys(),\
             "Node ID already exists: {}".format(new_node.id)
@@ -596,8 +596,8 @@ class CPPN():
 
         if parallel:
             for _, node in self.node_genome.items():
-                node.sum_inputs = torch.ones((1, self.config.res_h, self.config.res_w), device=self.device)/2.0
-                node.outputs = torch.ones((1, self.config.res_h, self.config.res_w), device=self.device)/2.0
+                node.sum_inputs = torch.zeros((1, self.config.res_h, self.config.res_w), device=self.device)
+                node.outputs = torch.zeros((1, self.config.res_h, self.config.res_w), device=self.device)
         else:
             for _, node in self.node_genome.items():
                 node.sum_inputs = torch.zeros(1, device=self.device)
@@ -702,7 +702,7 @@ class CPPN():
                 
         self.reset_activations()
         self.outputs = None # new image
-        self.fitness = torch.tensor(self.fitness.detach().item(), device=self.device)
+        self.fitness= torch.tensor(self.fitness.detach().item(), device=self.device)
         if hasattr(self, 'optimizer'):
             del self.optimizer
             self.optimizer = None
@@ -869,7 +869,7 @@ class CPPN():
             if in_node not in self.node_genome:
                 nodes = Node(in_node, idx_activation[act_in], types_arr[cx_id][0])
             if out_node not in self.node_genome:
-                self.node_genome[out_node] = Node(out_node, idx_activation[act_out], types_arr[cx_id][1])
+                self.node_genome[out_node] = Node(out_node, idx_activation[act_out], types_arr[cx_id][1], self.config.node_agg)
             self.connection_genome[(in_node, out_node)] = Connection((in_node, out_node), torch.tensor(weight, dtype=torch.float32, device=self.device))
             cx_id += 1
             
