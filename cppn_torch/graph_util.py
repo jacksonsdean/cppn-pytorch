@@ -3,11 +3,11 @@ import inspect
 import sys
 from typing import Callable
 import torch
+import torch.nn.functional as F
 from skimage.color import hsv2rgb as sk_hsv2rgb
 import numpy as np
 import cppn_torch.activation_functions as af
 import cppn_torch.fitness_functions as ff
-
 
 def is_valid_connection(nodes, key:tuple, config):
     """
@@ -133,8 +133,67 @@ def get_incoming_connections_weights(individual, node):
     if len(cxs) == 0:
         return None, None
     weights = torch.stack([cx.weight for cx in cxs]).to(individual.device)
-    inputs = torch.stack([individual.node_genome[c.key[0]].outputs for c in cxs]).to(individual.device)
+    inputs = torch.stack([individual.node_genome[c.key[0]].outputs for c in cxs], dim=1).to(individual.device)
+
+    # weights shape is (num_incoming)
+    # inputs shape is (batch, num_incoming, ...)
     return inputs, weights
+
+def group_incoming_by_fn(inputs, weights, nodes, max_num_incoming) -> dict:
+    # x shapes: (batch, nodes_with_fn, num_incoming, ...)
+    # w shapes: (nodes_with_fn, num_incoming)
+    X_W_by_fn = {}
+    for node, x, w in zip(nodes.values(), inputs, weights):
+        fn = node.activation.__name__
+        # add nodes_with_fn dimension:
+        x, w = x.unsqueeze(1), w.unsqueeze(0) 
+        
+        # pad inputs and weights with zeros to match the max number of incoming connections
+        x = F.pad(x, (0, 0, 0, 0, 0, max_num_incoming - x.shape[2], 0, 0))
+        w = F.pad(w, (0, max_num_incoming - w.shape[1]))
+
+        if fn not in X_W_by_fn:
+            X_W_by_fn[fn] = [[node.id], x, w]
+        else:
+            # concatenate inputs and weights along nodes_with_fn dimension
+            X_W_by_fn[fn][0].append(node.id)
+            X_W_by_fn[fn][1] = torch.cat((X_W_by_fn[fn][1], x), dim=1)
+            X_W_by_fn[fn][2] = torch.cat((X_W_by_fn[fn][2], w), dim=0)
+       
+    return X_W_by_fn
+
+def activate_layer(Xs, Ws, nodes, agg, name_to_fn = af.__dict__):
+    assert len(Xs) == len(Ws) == len(nodes), "Xs, Ws, Fns, and nodes must be the same length"
+    X_W_by_fn = group_incoming_by_fn(Xs, Ws, nodes, max([x.shape[1] for x in Xs])) # dict of (X, W) by node
+    
+    for fn, (ids, X, W) in X_W_by_fn.items():
+        # X shape = (batch, nodes_with_fn, num_incoming, ...)
+        # W shape = (nodes_with_fn, num_incoming)
+
+        fn = name_to_fn[fn]
+        
+        if agg == 'sum':
+            outputs = torch.einsum('bni...,ni->bn...', X, W)
+        
+        # TODO: I think these are wrong:
+        elif agg == 'mean':
+            outputs = torch.einsum('bni...,ni->bn...', X, W) / torch.sum(W, dim=1, keepdim=True)
+        # elif agg == 'max':
+            # outputs = torch.einsum('bni...,ni->bn...', X, W)
+            # outputs = torch.max(outputs, dim=2)[0]
+        # elif agg == 'min':
+            # outputs = torch.einsum('bni...,ni->bn...', X, W)
+            # outputs = torch.min(outputs, dim=2)[0]
+        
+        else:
+            raise ValueError(f"Unknown aggregation function {agg}. Try `config.activation_mode='node'` for more options.")
+        
+        # outputs shape should be (batch, nodes_with_fn, ...)
+        
+        outputs = fn(outputs)  # apply activation
+        for idx, id in enumerate(ids):
+            output = outputs[:, idx, ...]
+            nodes[id].outputs = output
 
 
 def hsv2rgb(hsv):

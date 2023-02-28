@@ -7,6 +7,7 @@ import json
 import os
 from typing import Callable, List
 from typing import Union
+from cppn_torch.graph_util import activate_layer
 import torch
 import networkx as nx
 
@@ -38,7 +39,7 @@ class CPPN():
     
     
     @staticmethod
-    def initialize_inputs(res_h, res_w, use_radial_dist, use_bias, n_inputs, device, coord_range=(-.5,.5), type=None):
+    def initialize_inputs(res_h, res_w, use_radial_dist, use_bias, n_inputs, device, coord_range=(-.5,.5), type=None, dtype=torch.float32):
         """Initializes the pixel inputs."""
         if type is None:
             type = __class__
@@ -52,11 +53,11 @@ class CPPN():
             
             
         # Pixel coordinates are linear within coord_range
-        x_vals = torch.linspace(coord_range_x[0], coord_range_x[1], res_w, device=device,dtype=torch.float32)
-        y_vals = torch.linspace(coord_range_y[0], coord_range_y[1], res_h, device=device,dtype=torch.float32)
+        x_vals = torch.linspace(coord_range_x[0], coord_range_x[1], res_w, device=device,dtype=dtype)
+        y_vals = torch.linspace(coord_range_y[0], coord_range_y[1], res_h, device=device,dtype=dtype)
 
         # initialize to 0s
-        type.constant_inputs = torch.zeros((res_h, res_w, n_inputs), dtype=torch.float32, device=device, requires_grad=False)
+        type.constant_inputs = torch.zeros((res_h, res_w, n_inputs), dtype=dtype, device=device, requires_grad=False)
 
         # assign values:
         type.constant_inputs[:, :, 0] = y_vals.unsqueeze(1).repeat(1, res_w)
@@ -66,7 +67,7 @@ class CPPN():
             # d = sqrt(x^2 + y^2)
             type.constant_inputs[:, :, 2] = torch.sqrt(type.constant_inputs[:, :, 0]**2 + type.constant_inputs[:, :, 1]**2)
         if use_bias:
-            type.constant_inputs[:, :, -1] = torch.ones((res_h, res_w), dtype=torch.float32, device=device, requires_grad=False) # bias = 1.0
+            type.constant_inputs[:, :, -1] = torch.ones((res_h, res_w), dtype=dtype, device=device, requires_grad=False) # bias = 1.0
         
         
         return type.constant_inputs
@@ -210,7 +211,7 @@ class CPPN():
         self.outputs = None
         for cx in self.connection_genome.values():
             cx.weight = cx.weight.detach()
-            cx.weight = torch.nn.Parameter(torch.tensor(cx.weight.item(), requires_grad=True, dtype=torch.float32))
+            cx.weight = torch.nn.Parameter(torch.tensor(cx.weight.item(), requires_grad=True, dtype=self.config.dtype))
         self.optimizer = opt_class([cx.weight for cx in self.connection_genome.values()], lr=lr)
 
     def initialize_connection_genome(self):
@@ -347,6 +348,8 @@ class CPPN():
     def mutate_activations(self, prob):
         """Mutates the activation functions of the nodes."""
         assert self.config is not None, "Config is None."
+        if len(self.config.activations) == 1:
+            return # no point in mutating if there is only one activation function
 
         eligible_nodes = list(self.hidden_nodes().values())
         if self.config.output_activation is None:
@@ -479,7 +482,7 @@ class CPPN():
         # the new node and the last node in the chain
         # is given the same weight as the connection being split
         new_cx_1 = Connection(
-            (old_connection.key[0], new_node.id), torch.tensor(1.0, device=self.device,dtype=torch.float32))
+            (old_connection.key[0], new_node.id), torch.tensor(1.0, device=self.device,dtype=self.config.dtype))
         assert new_cx_1.key not in self.connection_genome.keys()
         self.connection_genome[new_cx_1.key] = new_cx_1
 
@@ -633,24 +636,39 @@ class CPPN():
         layers = feed_forward_layers(self) 
         layers.insert(0, self.input_nodes().keys()) # add input nodes as first layer
         
+        # iterate over layers
         for layer in layers:
-            # iterate over layers
+            Xs, Ws, nodes, Fns = [], [], [], []
             for node_index, node_id in enumerate(layer):
                 # iterate over nodes in layer
                 node = self.node_genome[node_id] # the current node
                 
                 if node.type == NodeType.INPUT:
                     # initialize the node's sum
-                    X = inputs[:,:,node_index].repeat(batch_size, 1, 1) # (batch_size, res_h, res_w)
-                    weights = None
+                    X = inputs[:,:,node_index].repeat(batch_size, 1, 1, 1) # (batch_size, cx, res_h, res_w)
+                    weights = torch.ones((1), dtype=self.config.dtype, device=self.device)
                 else:
                     # find incoming connections and activate
                     X, weights = get_incoming_connections_weights(self, node)
+                    # X shape = (batch_size, num_incoming, res_h, res_w)
                     if X is None:
-                        X = torch.zeros((batch_size, res_h, res_w), dtype=torch.float32, device=self.device)
-                
-                node.activate(X, weights)
+                        X = torch.zeros((batch_size, 1, res_h, res_w), dtype=self.config.dtype, device=self.device)
+                    if weights is None:
+                        weights = torch.ones((1), dtype=self.config.dtype, device=self.device)
 
+                if self.config.activation_mode == 'node':
+                    node.activate(X, weights) # naive
+                elif self.config.activation_mode == 'layer':
+                    # group by function for efficiency
+                    Xs.append(X)
+                    Ws.append(weights)
+                    nodes.append(node)
+                else:
+                    raise ValueError(f"Unknown activation mode {self.config.activation_mode}")
+                
+            if self.config.activation_mode == 'layer':
+                activate_layer(Xs, Ws, {n.id:n for n in nodes}, self.config.node_agg)
+            
         # collect outputs from the last layer
         sorted_o = sorted(self.output_nodes().values(), key=lambda x: x.key, reverse=True)
         outputs = torch.stack([node.outputs for node in sorted_o])
@@ -684,7 +702,7 @@ class CPPN():
     def backward(self, loss:torch.Tensor,retain_graph=False):
         """Backpropagates the error through the network."""
         assert self.config is not None
-        assert self.config.with_grad, "Cannot backpropagate without gradients."
+        assert self.config.with_grad, "Cannot backpropagate without gradients. Set config.with_grad=True."
         self.optimizer.zero_grad()
         loss.backward(retain_graph=retain_graph)
         self.optimizer.step()
@@ -698,7 +716,7 @@ class CPPN():
                 # TODO: why NaN?
                 cx.weight = torch.tensor(0, device=self.device)
             else:
-                cx.weight = torch.tensor(cx.weight.detach().item(), device=self.device, dtype=torch.float32)
+                cx.weight = torch.tensor(cx.weight.detach().item(), device=self.device, dtype=self.config.dtype)
                 
         self.reset_activations()
         self.outputs = None # new image
@@ -870,7 +888,7 @@ class CPPN():
                 nodes = Node(in_node, idx_activation[act_in], types_arr[cx_id][0])
             if out_node not in self.node_genome:
                 self.node_genome[out_node] = Node(out_node, idx_activation[act_out], types_arr[cx_id][1], self.config.node_agg)
-            self.connection_genome[(in_node, out_node)] = Connection((in_node, out_node), torch.tensor(weight, dtype=torch.float32, device=self.device))
+            self.connection_genome[(in_node, out_node)] = Connection((in_node, out_node), torch.tensor(weight, dtype=self.config.dtype, device=self.device))
             cx_id += 1
             
         # BIG WARN: Only works in python 3.7+
@@ -917,7 +935,7 @@ class CPPN():
             # detach from current graph
             has_grad = cx.weight.requires_grad
             cx.weight = cx.weight.detach()
-            cx.weight = torch.tensor(cx.weight.item(), dtype=torch.float32) # require prepare_optimizer() again
+            cx.weight = torch.tensor(cx.weight.item(), dtype=self.config.dtype) # require prepare_optimizer() again
         if cpu:
             child.to_cpu()
         child.set_id(id)

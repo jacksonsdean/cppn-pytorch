@@ -21,7 +21,10 @@ class CPPNConfig:
         # These are only used if a sub-class does not override them
         self.seed = random.randint(0, 100000)
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
-
+        self.dtype = torch.float32
+        
+        self.activation_mode = "node" # "layer" or "node" 
+        
         self.with_grad = False # calculate autograd graph during forward pass
         self.sgd_learning_rate = 0.01
         self.sgd_steps = 100 # batch size is 1
