@@ -14,6 +14,7 @@ class TestSGD(unittest.TestCase):
         cppn = ImageCPPN()
         cppn.config.res_h, cppn.config.res_w = 128, 128
         cppn.config.with_grad = True
+        cppn.config.node_agg = "mean"
         cppn.reconfig()
         for _ in range(10):
             cppn.mutate()

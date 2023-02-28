@@ -1,16 +1,17 @@
 import time
 import unittest
 import torch
-from cppn_torch import ImageCPPN, CPPNConfig
 
-class TestImageCPPN(unittest.TestCase):
+from cppn_torch import CPPN, CPPNConfig
+
+class TestCPPN(unittest.TestCase):
     def test_speed(self):
         SEED = 0
         s = time.time()
         config = CPPNConfig()
         config.seed = SEED
         config.res_h, config.res_w = 1024, 1024
-        cppn = ImageCPPN(config)
+        cppn = CPPN(config)
         for _ in range(30):
             cppn.mutate()
             cppn.add_node()
@@ -19,46 +20,43 @@ class TestImageCPPN(unittest.TestCase):
             
         n = 300
         for _ in range(n):
-            _ = cppn.get_image(force_recalculate=True) 
+            _ = cppn.forward() 
             
         
-        print(f"Generated {n} 1024x1024 images in: {time.time() - s}")
+        print(f"Generated {n} 1024x1024 outputs in: {time.time() - s}")
     
     def test_image(self):
-        return
         config = CPPNConfig()
         config.set_res(128)
-        cppn = ImageCPPN(config)
-        image = cppn.get_image() 
+        cppn = CPPN(config)
+        image = cppn.forward() 
         
         assert image.shape == (128, 128, 3), f"Image shape is {image.shape}, expected (128, 128, 3)"
         assert image.dtype == torch.float32, f"Image dtype is {image.dtype}, expected torch.float32"           
     
     def test_aggs(self):
-        return
         aggs = ["sum", "mean", "max", "min"]
         for agg in aggs:
             config = CPPNConfig()
             config.node_agg = agg
-            cppn = ImageCPPN(config)
-            output = cppn.get_image()
+            cppn = CPPN(config)
+            output = cppn.forward()
             assert output.shape == (config.res_h, config.res_w, 3), f"Output shape is {output.shape}, expected {(config.res_h, config.res_w, 3)}"
         
     def test_seed(self):
-        return
         SEED = 0
 
         config = CPPNConfig()
         config.seed = SEED
-        cppn = ImageCPPN(config)
-        image_0 = cppn.get_image() 
+        cppn = CPPN(config)
+        image_0 = cppn.forward() 
         
         del cppn
         
         config = CPPNConfig()
         config.seed = SEED
-        cppn = ImageCPPN(config)
-        image_1 = cppn.get_image()
+        cppn = CPPN(config)
+        image_1 = cppn.forward()
         
         assert torch.isclose(image_0, image_1).all(), f"Images are not close. Difference: {((image_0 - image_1)**2).mean()}"
         
