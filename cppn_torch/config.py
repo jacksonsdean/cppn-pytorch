@@ -161,6 +161,8 @@ class CPPNConfig:
 
         if self.target_name is not None:
             self.target = self.target_name
+        
+        self.dtype = str(self.dtype) # TODO deserialize 
 
     def strings_to_fns(self):
         """Converts the activation functions to functions."""
