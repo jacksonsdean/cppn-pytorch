@@ -131,6 +131,7 @@ class Node(Gene):
         self.layer = int(self.layer)
         self.sum_inputs = None
         self.outputs = None
+        self.dtype = str(self.dtype)
         if isinstance(self.activation, Callable):
             self.activation = self.activation.__name__
     
