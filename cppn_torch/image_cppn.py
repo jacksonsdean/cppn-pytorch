@@ -23,7 +23,7 @@ class ImageCPPN(CPPN):
         """
         assert self.config is not None, "Config is None."
 
-        if self.config.dirty:
+        if inputs is None and self.config.dirty:
             raise RuntimeError("config is dirty, did you forget to call .reconfig() after changing config?")
        
         if not extra_inputs is None:
