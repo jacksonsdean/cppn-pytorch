@@ -755,7 +755,7 @@ class CPPN():
             difference_of_matching_weights = 0
         else:
             difference_of_matching_weights = torch.mean(
-                torch.stack(difference_of_matching_weights)).item()
+                torch.stack(difference_of_matching_weights).to(self.config.dtype)).item()
 
         # Furthermore, the compatibility distance function
         # includes an additional argument that counts how many
