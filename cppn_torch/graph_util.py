@@ -157,8 +157,8 @@ def group_incoming_by_fn(inputs, weights, nodes, max_num_incoming) -> dict:
         else:
             # concatenate inputs and weights along nodes_with_fn dimension
             X_W_by_fn[fn][0].append(node.id)
-            X_W_by_fn[fn][1] = torch.cat((X_W_by_fn[fn][1], x), dim=1)
-            X_W_by_fn[fn][2] = torch.cat((X_W_by_fn[fn][2], w), dim=0)
+            X_W_by_fn[fn][1] = torch.cat((X_W_by_fn[fn][1], x), dim=1).to(torch.float32)
+            X_W_by_fn[fn][2] = torch.cat((X_W_by_fn[fn][2], w), dim=0).to(torch.float32)
        
     return X_W_by_fn
 
