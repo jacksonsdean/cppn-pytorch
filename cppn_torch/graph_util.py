@@ -132,6 +132,9 @@ def get_incoming_connections_weights(individual, node):
     cxs = list(filter(lambda x, n=node: x.key[1] == n.id, individual.enabled_connections())) 
     if len(cxs) == 0:
         return None, None
+    if None in [individual.node_genome[c.key[0]].outputs for c in cxs]:
+        print(individual.id, [individual.node_genome[c.key[0]].outputs for c in cxs])
+        print(list(individual.enabled_connections()))
     weights = torch.stack([cx.weight for cx in cxs]).to(individual.device)
     inputs = torch.stack([individual.node_genome[c.key[0]].outputs for c in cxs], dim=1).to(individual.device)
 
@@ -140,10 +143,12 @@ def get_incoming_connections_weights(individual, node):
     return inputs, weights
 
 def group_incoming_by_fn(inputs, weights, nodes, max_num_incoming) -> dict:
-    # x shapes: (batch, nodes_with_fn, num_incoming, ...)
-    # w shapes: (nodes_with_fn, num_incoming)
+    # from x shapes: (batch, num_incoming, ...)
+    # from w shapes: (num_incoming)
+    # to x shapes: (batch, nodes_with_fn, num_incoming, ...)
+    # to w shapes: (nodes_with_fn, num_incoming)
     X_W_by_fn = {}
-    for node, x, w in zip(nodes.values(), inputs, weights):
+    for (id,node), x, w in zip(nodes.items(), inputs, weights):
         fn = node.activation.__name__
         # add nodes_with_fn dimension:
         x, w = x.unsqueeze(1), w.unsqueeze(0) 
@@ -153,10 +158,10 @@ def group_incoming_by_fn(inputs, weights, nodes, max_num_incoming) -> dict:
         w = F.pad(w, (0, max_num_incoming - w.shape[1]))
 
         if fn not in X_W_by_fn:
-            X_W_by_fn[fn] = [[node.id], x, w]
+            X_W_by_fn[fn] = [[id], x, w]
         else:
             # concatenate inputs and weights along nodes_with_fn dimension
-            X_W_by_fn[fn][0].append(node.id)
+            X_W_by_fn[fn][0].append(id)
             X_W_by_fn[fn][1] = torch.cat((X_W_by_fn[fn][1], x), dim=1).to(torch.float32)
             X_W_by_fn[fn][2] = torch.cat((X_W_by_fn[fn][2], w), dim=0).to(torch.float32)
        
@@ -193,7 +198,117 @@ def activate_layer(Xs, Ws, nodes, agg, name_to_fn = af.__dict__):
         outputs = fn(outputs)  # apply activation
         for idx, id in enumerate(ids):
             output = outputs[:, idx, ...]
-            nodes[id].outputs = output
+            nodes.get(id).outputs = output
+
+
+def activate_population(genomes, config, inputs = None,  name_to_fn = af.__dict__):
+    if inputs is None:
+        inputs = type(genomes[0]).constant_inputs
+    batch_size = 1 # TODO
+        
+    result = []
+    nodes_by_id = {}
+    genomes_by_id = {}
+    for g in genomes:
+        g.reset_activations()
+        genomes_by_id[g.id] = g
+        for node in g.node_genome.values():
+            nodes_by_id[(g.id, node.id)] = node
+    pop_layers = [feed_forward_layers(genome) for genome in genomes]
+    for layers, genome in zip(pop_layers, genomes):
+        layers.insert(0, set(genome.input_nodes().keys())) # add input nodes as first layer
+        for i in range(len(layers)):
+            layers[i] = list(layers[i])
+
+    for i, (layers, genome) in enumerate(zip(pop_layers, genomes)):
+        for j in range(len(layers)):
+            pop_layers[i][j] = [(genome.id, genome.node_genome[id]) for id in layers[j]]
+            
+    # pop_layers = (population_size, num_layers, num_nodes_in_layer)
+    max_num_layers = max([len(l) for l in pop_layers])
+    for layer_index in range(max_num_layers):
+        # get this layer from all genomes
+        layer = [layer[layer_index] for i, layer in enumerate(pop_layers) if layer_index < len(layer)]
+
+        # find all the nodes in this layer that have incoming connections
+        # x shapes: (pop, nodes_with_fn, num_incoming, ...)
+        # w shapes: (nodes_with_fn, num_incoming)
+        Xs, Ws, nodes = [],[],[]
+        max_num_incoming = 0
+        layer_flat = [n for sublayer in layer for n in sublayer]
+        layer_flat = sorted(layer_flat, key=lambda x: x[1].id, reverse=True)
+        for genome_id, node in layer_flat:
+            if int(node.type) == 0:
+                # initialize the node's sum
+                # NOTE: -node.id-1 is really hacky, assumes that input node ids are -1...-num_inputs (they are by default)
+                node_index = -node.id-1
+                X = inputs[:,:,node_index].repeat(batch_size, 1, 1, 1) # (batch_size, cx, res_h, res_w)
+            
+                W = torch.ones((1), dtype=config.dtype, device=config.device)
+            else:   
+                # print("getting incoming connections for ", genome_id, node.id)
+                X, W = get_incoming_connections_weights(genomes_by_id[genome_id], node)
+                # print("should be", get_incoming_connections(genomes_by_id[genome_id], node))
+            if X is not None and X.shape[1] > max_num_incoming:
+                max_num_incoming = X.shape[1]
+            if X is None:
+                X = torch.zeros((1, 1, config.res_h, config.res_w), dtype=config.dtype, device=config.device)
+            if W is None:
+                W = torch.ones((1), dtype=config.dtype, device=config.device)
+            Xs.append(X)
+            Ws.append(W)
+            nodes.append((genome_id, node))
+        layer_nodes_by_id = {(genome_id, node.id): node for genome_id, node in nodes}
+        # activate the nodes in this layer
+        # group the nodes by their activation function
+        assert len(Xs) == len(Ws) == len(nodes), "Xs, Ws, Fns, and nodes must be the same length"
+        X_W_by_fn = group_incoming_by_fn(Xs, Ws, layer_nodes_by_id, max_num_incoming) # dict of (X, W) by node
+        # print(X_W_by_fn)
+        for fn, (ids, layer_X, layer_W) in X_W_by_fn.items():
+            # X shape = (batch, nodes_with_fn, num_incoming, ...)
+            # W shape = (nodes_with_fn, num_incoming)
+
+            fn = name_to_fn[fn]
+            
+            if config.node_agg == 'sum':
+                outputs = torch.einsum('bni...,ni->bn...', layer_X, layer_W)
+            else:
+                raise ValueError(f"Unknown config.node_agg function {config.node_agg}. Try `config.activation_mode='node'` for more options.")
+            
+            # outputs shape should be (batch, nodes_with_fn, ...)
+            
+            outputs = fn(outputs)  # apply activation
+            
+            assert len(ids) == outputs.shape[1], "ids and outputs must be the same length"
+            for idx, id in enumerate(ids):
+                output = outputs[:, idx, ...]
+                nodes_by_id.get(id).outputs = output
+    
+    for g in genomes:
+        sorted_o = sorted(g.output_nodes().values(), key=lambda x: x.key, reverse=True)
+        g.outputs = torch.stack([node.outputs for node in sorted_o])
+        if hasattr(g, 'get_image'):
+            if len(g.config.color_mode)>2:
+                g.outputs  =  g.outputs.permute(1, 2, 3, 0) # move color axis to end
+            else:
+                g.outputs  = torch.reshape(g.outputs , (1, g.config.res_h, g.config.res_w))
+
+            g.outputs  = g.outputs.squeeze(0) # remove batch dimension if batch size is 1
+            # reshape the outputs to image shape
+            if not len(g.config.color_mode)>2:
+                g.outputs  = torch.reshape(g.outputs, (g.config.res_h, g.config.res_w))
+            
+            if g.config.normalize_outputs:
+                g.normalize_image()
+            else:
+                g.clamp_image()
+            
+            result.append(g.outputs)
+        
+        
+    return result
+
+
 
 
 def hsv2rgb(hsv):

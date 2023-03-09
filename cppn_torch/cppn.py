@@ -28,7 +28,7 @@ def random_choice(choices, count, replace):
             output.append(choices[i])
         return output
     else:
-        return [random.choice(choices) for _ in range(count)]
+        return choices[torch.randint(len(choices), (count,))]
 
 class CPPN():
     """A CPPN Object with Nodes and Connections."""
@@ -755,7 +755,7 @@ class CPPN():
             difference_of_matching_weights = 0
         else:
             difference_of_matching_weights = torch.mean(
-                torch.stack(difference_of_matching_weights).to(self.config.dtype)).item()
+                torch.stack(difference_of_matching_weights)).item()
 
         # Furthermore, the compatibility distance function
         # includes an additional argument that counts how many

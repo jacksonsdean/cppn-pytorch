@@ -23,7 +23,7 @@ class CPPNConfig:
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.dtype = torch.float32
         
-        self.activation_mode = "node" # "layer" or "node" 
+        self.activation_mode = "node" # "node", "layer", or "population" 
         
         self.with_grad = False # calculate autograd graph during forward pass
         self.sgd_learning_rate = 0.01
