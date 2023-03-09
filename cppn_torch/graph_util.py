@@ -306,7 +306,7 @@ def activate_population(genomes, config, inputs = None,  name_to_fn = af.__dict_
             result.append(g.outputs)
         
         
-    return result
+    return torch.stack(result)
 
 
 
