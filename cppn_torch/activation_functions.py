@@ -75,5 +75,9 @@ def gauss(x):
     y = 2*torch.exp(-20.0 * (x) ** 2)-.5
     return y
 
-# def sawtooth(x):
-#     torch.abs((x++ % 6) - 3)
+def triangle(X):
+    return 1 - 2 *torch.arccos((1 - .0001) * torch.sin(2 * torch.pi * X))/torch.pi
+def square(X):
+    return 2* torch.arctan(torch.sin(2 *torch.pi* X)/.0001)/torch.pi
+def sawtooth(X):
+    return (1 + triangle((2*X - 1)/4.0) * square(X/2.0)) / 2.0
