@@ -6,6 +6,7 @@ import networkx as nx
 import sys
 import inspect
 import random
+from torch import nn
 
 from scikits import bootstrap
 import warnings
@@ -339,3 +340,28 @@ def get_avg_number_of_connections(population):
     for g in population:
         count+=len(list(g.enabled_connections()))
     return count/len(population)
+
+
+
+def upscale_conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=True, device="cpu"):
+    # return ConvTranspose2d(in_channels,out_channels,kernel_size, stride=stride, padding=padding, output_padding=1,device=device)
+    layer = nn.Sequential(
+        nn.Upsample(scale_factor=2, mode='bilinear'),
+        nn.ReflectionPad2d(1),
+        nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=padding, device=device, bias=bias)
+   )
+    return layer
+
+def show_inputs(inputs):
+    cols = 8
+    rows = 1 + inputs.shape[2] // cols
+    fig = plt.figure(figsize=(20,20))
+    for axis in range(inputs.shape[2]):
+        plt.subplot(rows, cols, axis+1)
+        plt.imshow(inputs[:, :, axis].detach().cpu(), cmap="viridis")
+        plt.title(f"Input {axis}")
+        plt.axis("off")
+        plt.tight_layout()
+    plt.show()
+
+
