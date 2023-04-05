@@ -4,7 +4,7 @@ import json
 import random
 import sys
 from typing import Callable
-import imageio as iio
+import imageio.v2 as iio
 import torch
 import typing
 
