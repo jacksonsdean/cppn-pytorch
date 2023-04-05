@@ -2,22 +2,30 @@ import copy
 from typing import List
 
 import torch
+from torch import nn
 from functorch.compile import compiled_function, draw_graph, aot_function
+from typing import Optional, TypeVar, Union
 
 from cppn_torch.config import CPPNConfig as Config
 from cppn_torch import CPPN
 from cppn_torch.gene import NodeType
-from cppn_torch.graph_util import feed_forward_layers, find_node_with_id, get_incoming_connections, hsv2rgb
+from cppn_torch.graph_util import feed_forward_layers, find_node_with_id, get_incoming_connections, hsl2rgb_torch
+
+from cppn_torch.normalization import *
 
 class ImageCPPN(CPPN):
     def __init__(self, config=Config(), nodes=None, connections=None) -> None:
         super().__init__(config, nodes, connections)
+        
+        self.imagenet_norm = None
+        if self.config.normalize_outputs and "imagenet" in self.config.normalize_outputs:
+            self.imagenet_norm = Normalization(self.device)
    
     @property
     def image(self):
         return self.outputs
    
-    def get_image(self, inputs=None, force_recalculate=False, override_h=None, override_w=None, extra_inputs=None, no_aot=True):
+    def get_image(self, inputs=None, force_recalculate=False, override_h=None, override_w=None, extra_inputs=None, no_aot=True, channel_first=True):
         """Returns an image of the network.
             Extra inputs are (batch_size, num_extra_inputs)
         """
@@ -44,9 +52,16 @@ class ImageCPPN(CPPN):
         recalculate = recalculate or force_recalculate
         if isinstance(self.outputs, torch.Tensor):
             assert self.outputs is not None
+            if len(self.config.color_mode) == 3:
+                if (channel_first and not torch.argmin(torch.tensor(self.outputs.shape)).item() == 0):
+                    self.outputs = self.outputs.permute(2, 0, 1)
+                elif (not channel_first and not torch.argmin(torch.tensor(self.outputs.shape)).item() == len(self.outputs.shape) - 1):
+                    self.outputs = self.outputs.permute(1, 2, 0)
+                
+            O = self.outputs
             recalculate = recalculate or extra_inputs is not None # TODO we could cache the extra inputs and check
-            recalculate = recalculate or self.config.res_h == self.outputs.shape[0]
-            recalculate = recalculate or self.config.res_w == self.outputs.shape[1]
+            recalculate = recalculate or self.config.res_h == O.shape[0]
+            recalculate = recalculate or self.config.res_w == O.shape[1]
         else:
             # no cached image
             recalculate = True
@@ -65,7 +80,7 @@ class ImageCPPN(CPPN):
             self.outputs = self.get_image_data_serial(extra_inputs=extra_inputs)
         else:
             # whole image at once (100sx faster)
-            self.outputs = self.forward(inputs=inputs, extra_inputs=extra_inputs, no_aot=no_aot)
+            self.outputs = self.forward(inputs=inputs, extra_inputs=extra_inputs, no_aot=no_aot, channel_first=channel_first)
 
         assert self.outputs.dtype == torch.float32, f"Image is {self.outputs.dtype}, should be float32"
         assert str(self.outputs.device) == str(self.device), f"Image is on {self.outputs.device}, should be {self.device}"
@@ -95,7 +110,7 @@ class ImageCPPN(CPPN):
         self.outputs = pixels_tensor
         return self.outputs
 
-    def forward_(self, inputs=None, extra_inputs=None):
+    def forward_(self, inputs=None, extra_inputs=None, channel_first=True):
         """Evaluate the network to get output data in parallel
             Extra inputs are (batch_size, num_extra_inputs)
         """
@@ -121,19 +136,12 @@ class ImageCPPN(CPPN):
             inputs = type(self).constant_inputs
             
         assert inputs is not None
-        assert inputs.shape[0] == res_h
-        assert inputs.shape[1] == res_w
         assert inputs.shape[2] == self.config.num_inputs
         assert str(inputs.device) == str(self.device), f"Inputs are on {inputs.device}, should be {self.device}"
         
             
         # evaluate CPPN
         self.outputs = super().forward_(inputs=inputs, extra_inputs=extra_inputs)
-
-        if len(self.config.color_mode)>2:
-            self.outputs  =  self.outputs.permute(1, 2, 3, 0) # move color axis to end
-        else:
-            self.outputs  = torch.reshape(self.outputs , (batch_size, res_h, res_w))
 
         if batch_size == 1:
             self.outputs  = self.outputs.squeeze(0) # remove batch dimension if batch size is 1
@@ -143,9 +151,19 @@ class ImageCPPN(CPPN):
         
         if self.config.normalize_outputs:
             self.normalize_image()
-        else:
-            self.clamp_image()
+
+        self.clamp_image()
         
+        
+        if len(self.config.color_mode) > 2 and not channel_first:
+            if batch_size == 1:
+                self.outputs  =  self.outputs.permute(1, 2, 0) # move color axis to end
+            else:
+                self.outputs  =  self.outputs.permute(0, 2, 3, 1) # move color axis to end
+        else:
+            if batch_size > 1:
+                self.outputs  = torch.reshape(self.outputs , (batch_size, res_h, res_w))
+                
         assert str(self.outputs.device)== str(self.device), f"Image is on {self.outputs.device}, should be {self.device}"
         assert self.outputs.dtype == torch.float32, f"Image is {self.outputs.dtype}, should be float32"
         return self.outputs
@@ -161,20 +179,24 @@ class ImageCPPN(CPPN):
         assert self.outputs.dtype == torch.float32, f"Image is not float32, is {self.outputs.dtype}"
         assert str(self.outputs.device) == str(self.device), f"Image is on {self.outputs.device}, should be {self.device}"
         assert self.config is not None, "Config is None."
+        assert self.config.normalize_outputs, "normalize_outputs is False or None"
         
-        max_value = torch.max(self.outputs)
-        min_value = torch.min(self.outputs)
-        image_range = max_value - min_value
-        self.outputs = self.outputs - min_value
-        self.outputs = self.outputs/(image_range+1e-8)
-
+        self.outputs = handle_normalization(self.outputs, self.config.normalize_outputs, self.imagenet_norm)
+            
         if self.config.color_mode == 'HSL':
             # assume output is HSL and convert to RGB
-            self.outputs = hsv2rgb(self.outputs) # convert to RGB
-    
+            self.outputs = hsl2rgb_torch(self.outputs)
         
-    def __call__(self, inputs=None, force_recalculate=False, override_h=None, override_w=None, extra_inputs=None, no_aot=True):
-        return self.get_image(inputs=inputs, force_recalculate=force_recalculate, override_h=override_h, override_w=override_w, extra_inputs=extra_inputs, no_aot=no_aot)
+    def __call__(self, inputs=None, force_recalculate=False, override_h=None, override_w=None, extra_inputs=None, no_aot=True, channel_first=True):
+        return self.get_image(
+                            inputs=inputs,
+                            force_recalculate=force_recalculate,
+                            override_h=override_h,
+                            override_w=override_w,
+                            extra_inputs=extra_inputs,
+                            no_aot=no_aot,
+                            channel_first=channel_first
+                            )
     
     
 if __name__ == '__main__':

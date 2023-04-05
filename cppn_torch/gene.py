@@ -22,6 +22,9 @@ class Gene(object):
             setattr(new_gene, name, value)
 
         return new_gene
+    
+    def mutate(self):
+        raise NotImplementedError
 
     @property
     def key(self):
@@ -48,7 +51,7 @@ class Gene(object):
     
 class Node(Gene):
     """Represents a node in the CPPN."""
-    # TODO: aggregation function, bias, response(?)
+    # TODO: aggregation function, response(?)
     
     @staticmethod
     def create_from_json(json_dict):
@@ -62,7 +65,7 @@ class Node(Gene):
         """Returns an empty node. Default activation function is identity."""
         return Node(0, identity, NodeType.HIDDEN, 0)
 
-    def __init__(self, key, activation=None, _type=2, _layer=999, node_agg="sum") -> None:
+    def __init__(self, key, activation=None, _type=2, _layer=999, node_agg="sum", device="cpu", grad=True) -> None:
         self.activation = activation
         self.id = key
         self.type = _type
@@ -70,6 +73,7 @@ class Node(Gene):
         self.sum_inputs = None
         self.outputs = None
         self.agg = node_agg
+        self.bias = torch.zeros(1, device=device, requires_grad=grad)
         super().__init__()
     
     @property
@@ -84,14 +88,17 @@ class Node(Gene):
             self.sum_inputs = self.sum_inputs.cpu()
         if self.outputs is not None:
             self.outputs = self.outputs.cpu()
+        if self.bias is not None:
+            self.bias = self.bias.cpu()
 
     def activate(self, X, W):
         """Activates the node given a list of connections that end here."""
         assert isinstance(self.activation, Callable), "activation function is not a function"
+
         if X is None:
             return
         if W is None:
-            self.outputs = self.activation(X)
+            self.outputs = self.activation(X) + self.bias
             return
         
         X = X.permute(1, 0, 2, 3) # (num_incoming, batch_size, ...)
@@ -117,7 +124,8 @@ class Node(Gene):
                 raise ValueError(f"Unknown aggregation function {self.agg}")
             
             self.sum_inputs = self.sum_inputs.reshape(X_shape) # reshape back to original shape
-            
+        
+        self.sum_inputs += self.bias
         self.outputs = self.activation(self.sum_inputs)  # apply activation
 
     def initialize_sum(self, initial_sum):
@@ -131,6 +139,7 @@ class Node(Gene):
         self.layer = int(self.layer)
         self.sum_inputs = None
         self.outputs = None
+        self.bias = self.bias.item() if isinstance(self.bias, torch.Tensor) else self.bias
 
         if isinstance(self.activation, Callable):
             self.activation = self.activation.__name__
@@ -154,6 +163,14 @@ class Node(Gene):
         self.__dict__ = json_dict
         self.deserialize()
         assert isinstance(self.activation, Callable), "activation function is not a function"
+        return self
+    
+    def to(self, device):
+        self.bias = self.bias.to(device)
+        if self.sum_inputs is not None:
+            self.sum_inputs = self.sum_inputs.to(device)
+        if self.outputs is not None:
+            self.outputs = self.outputs.to(device)
         return self
 
 class Connection(Gene):
@@ -215,4 +232,7 @@ class Connection(Gene):
     def __repr__(self):
         return f"([{self.key[0]}->{self.key[1]}] "+\
             f"W:{self.weight:3f} E:{int(self.enabled)} R:{int(self.is_recurrent)})"
-
+    
+    def to(self, device):
+        self.weight = self.weight.to(device)
+        return self

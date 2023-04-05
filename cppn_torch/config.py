@@ -19,7 +19,7 @@ class CPPNConfig:
     def __init__(self) -> None:
         # Initialize to default values
         # These are only used if a sub-class does not override them
-        self.seed = random.randint(0, 100000)
+        self.seed = None
         self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.dtype = torch.float32
         
@@ -28,7 +28,8 @@ class CPPNConfig:
         self.with_grad = False # calculate autograd graph during forward pass
         self.sgd_learning_rate = 0.01
         self.sgd_steps = 100 # batch size is 1
-        
+        self.num_upsamples = 0
+        self.num_conv=0
         self.dry_run = False
         self.res_w = 28
         self.res_h = 28
@@ -40,10 +41,10 @@ class CPPNConfig:
         self.allow_recurrent = False
         self.init_connection_probability = 0.85
         self.activations = get_all()
-        self.normalize_outputs = True
+        self.normalize_outputs = 'picbreeder' # None, "picbreeder", "sigmoid", 'min_max', 'abs_tanh'
         self.node_agg = 'sum'
         
-        self.genome_type = None # default to CPPN
+        self.genome_type = None # algorithm default
         
         # NEAT specific parameters
         self.use_speciation = True
@@ -66,14 +67,19 @@ class CPPNConfig:
         self.prob_remove_node = 0.05
         self.prob_disable_connection = .05
 
+        self.bias_mutation_std = .30
+        self.prob_mutate_bias = .80
+
         self.max_weight = 3.0
+        self.weight_mutation_std = 2.0
+        self.weight_init_std = 1.0
         self.weight_threshold = 0
         self.prob_random_restart =.001
         self.prob_weight_reinit = 0.1 * .80 # .1 in the original NEAT (.1 of .8)
         self.prob_reenable_connection = 0.1
-        self.weight_mutation_max = 2
-        
+        self.coord_range = (-0.5, 0.5)
         self.output_activation = None
+        self.target_resize = None # use original size
         
         self.output_dir = None
         self.experiment_condition = "_default"
@@ -88,8 +94,7 @@ class CPPNConfig:
         self.animate = False
 
         # https://link.springer.com/content/pdf/10.1007/s10710-007-9028-8.pdf page 148
-        self.use_input_bias = True # SNGA,
-        # self.use_input_bias = False # SNGA,
+        self.use_input_bias = False # SNGA,
         # self.use_radial_distance = True # bias towards radial symmetry
         self.use_radial_distance = False # bias towards radial symmetry
         
@@ -230,3 +235,7 @@ class CPPNConfig:
             setattr(config, key, value)
         config.strings_to_fns()
         return config
+
+
+    def get(self, name, default=None):
+        return self.__dict__.get(name, default)

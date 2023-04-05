@@ -49,9 +49,13 @@ def name_to_fn(name):
     return fns[[f[0] for f in fns].index(name)][1]
 
 
-def choose_random_function(config) -> Callable:
+def choose_random_function(generator, config) -> Callable:
     """Chooses a random activation function from the activation function module."""
-    random_fn = config.activations[torch.randint(0, len(config.activations), (1,))[0]]
+    random_fn = config.activations[torch.randint(0,
+                                                 len(config.activations),
+                                                 (1,), 
+                                                 generator=generator,
+                                                 device=generator.device)[0]]
     return random_fn
 
 
@@ -111,8 +115,8 @@ def get_ids_from_individual(individual):
     inputs = list(individual.input_nodes().keys())
     outputs = list(individual.output_nodes().keys())
     connections = [c.key
-                #    for c in individual.enabled_connections()]
-                   for c in individual.connection_genome.values()]
+                   for c in individual.enabled_connections()]
+                #    for c in individual.connection_genome.values()]
     return inputs, outputs, connections
 
 
@@ -192,6 +196,9 @@ def activate_layer(Xs, Ws, nodes, agg, name_to_fn = af.__dict__):
         
         else:
             raise ValueError(f"Unknown aggregation function {agg}. Try `config.activation_mode='node'` for more options.")
+        
+        # add bias
+        #outputs += torch.tensor([node.bias for node in nodes.values() ids], device=outputs.device)
         
         # outputs shape should be (batch, nodes_with_fn, ...)
         
@@ -311,11 +318,6 @@ def activate_population(genomes, config, inputs = None,  name_to_fn = af.__dict_
 
 
 
-def hsv2rgb(hsv):
-    return torch.tensor(sk_hsv2rgb(hsv), dtype=torch.float32, device=hsv.device)
-      
-
-
 # Functions below are modified from other packages
 # This is necessary because AWS Lambda has strict space limits,
 # and we only need a few methods, not the entire packages.
@@ -416,7 +418,7 @@ def feed_forward_layers(individual):
         # Keep only the used nodes whose entire input set is contained in s.
         t = set()
         for n in c:
-            if n in required and all(a in s for (a, b) in connections if b == n):
+            if n in required and any(a in s for (a, b) in connections if b == n):
                 t.add(n)
         if not t:
             break
@@ -426,3 +428,25 @@ def feed_forward_layers(individual):
     return layers
 
 
+
+# FROM: https://github.com/limacv/RGB_HSV_HSL
+def hsl2rgb_torch(hsl: torch.Tensor) -> torch.Tensor:
+    hsl = hsl.unsqueeze(0)
+    # hsl = hsl.permute(2, 0, 1).unsqueeze(0)
+    hsl_h, hsl_s, hsl_l = hsl[:, 0:1], hsl[:, 1:2], hsl[:, 2:3]
+    _c = (-torch.abs(hsl_l * 2. - 1.) + 1) * hsl_s
+    _x = _c * (-torch.abs(hsl_h * 6. % 2. - 1) + 1.)
+    _m = hsl_l - _c / 2.
+    idx = (hsl_h * 6.).type(torch.uint8)
+    idx = (idx % 6).expand(-1, 3, -1, -1)
+    rgb = torch.empty_like(hsl)
+    _o = torch.zeros_like(_c)
+    rgb[idx == 0] = torch.cat([_c, _x, _o], dim=1)[idx == 0]
+    rgb[idx == 1] = torch.cat([_x, _c, _o], dim=1)[idx == 1]
+    rgb[idx == 2] = torch.cat([_o, _c, _x], dim=1)[idx == 2]
+    rgb[idx == 3] = torch.cat([_o, _x, _c], dim=1)[idx == 3]
+    rgb[idx == 4] = torch.cat([_x, _o, _c], dim=1)[idx == 4]
+    rgb[idx == 5] = torch.cat([_c, _o, _x], dim=1)[idx == 5]
+    rgb += _m
+    rgb = rgb.squeeze(0)#.permute(1, 2, 0)
+    return rgb

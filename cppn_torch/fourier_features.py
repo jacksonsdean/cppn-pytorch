@@ -8,14 +8,12 @@ def apply_mapping(x, B:torch.tensor):
     return x
   else:
     x_proj = (2.*torch.pi*x) @ B.T
-    x_proj = (2.*torch.pi*x) @ B.T
     f0 = torch.sin(x_proj)
-    f1 = torch.cos(x_proj)
-    # f1 = gauss(x_proj)
-    return torch.cat([f0, f1], dim=-1)
+    # f1 = torch.cos(x_proj)
+    return torch.cat([f0], dim=-1)
 
 def input_mapping(x, b_scale:float, mapping_size:int, dims:int=2):
-    B_gauss = torch.randn((mapping_size//dims, dims), device=x.device)
+    B_gauss = torch.randn((mapping_size, dims), device=x.device)
     B_gauss = B_gauss * b_scale
     return apply_mapping(x, B_gauss)
   
@@ -23,12 +21,14 @@ def input_mapping(x, b_scale:float, mapping_size:int, dims:int=2):
 def add_fourier_features(x, n_features, B_scale=10.0, dims=2, include_original=False, mult_percent=.5):
     assert n_features % dims == 0, "mapping_size must be divisible by dims"
     
+    # get first dims features
+    feats = x[:,:, :dims]
     
     if mult_percent:
       orig_n_features = n_features
       n_features = orig_n_features - int(orig_n_features * mult_percent)
       
-    f_feats = input_mapping(x, B_scale, n_features, dims=dims)
+    f_feats = input_mapping(feats, B_scale, n_features, dims=dims)
 
     if mult_percent:
       while f_feats.shape[-1] < orig_n_features:
