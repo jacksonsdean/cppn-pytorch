@@ -7,14 +7,13 @@ import sys
 import inspect
 import random
 from torch import nn
-
-from scikits import bootstrap
-import warnings
-warnings.filterwarnings("ignore") # for bootstrap CI
+import torch
+from typing import List, Union
+from cv2 import resize as cv2_resize
 
 from cppn_torch.cppn import NodeType
-from cppn_torch.graph_util import get_ids_from_individual, required_for_output
-    
+from cppn_torch.graph_util import feed_forward_layers, get_ids_from_individual, get_incoming_connections_weights, required_for_output
+from cppn_torch.normalization import handle_normalization
    
 def visualize_network(individual, sample_point=None, color_mode="L", visualize_disabled=False, layout='multi', sample=False, show_weights=False, use_inp_bias=False, use_radial_distance=True, save_name=None, extra_text=None, curved=False, return_fig=False):
     c = individual.config
@@ -35,14 +34,10 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
 
     G = nx.DiGraph()
     function_colors = {}
-    # colors = ['r', 'g', 'b', 'c', 'm', 'y', 'orange', 'darkviolet',
-    #         'hotpink', 'chocolate', 'lawngreen', 'lightsteelblue']
     colors = ['lightsteelblue'] * len([node.activation for node in individual.node_genome.values()])
     node_labels = {}
 
     node_size = 2000
-    # plt.figure(figsize=(int(1+(individual.count_layers())*1.5), 6), frameon=False)
-    # plt.figure(figsize=(7, 6), frameon=False)
     plt.subplots_adjust(left=0, bottom=0, right=1.25, top=1.25, wspace=0, hspace=0)
 
     for i, fn in enumerate([node.activation for node in individual.node_genome.values()]):
@@ -57,8 +52,6 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
                 continue
             G.add_node(node, color=function_colors[node.activation.__name__], shape='d', layer=(node.layer))
             if node.type == 0:
-                # node_labels[node] = f"S{i}:\n{node.activation.__name__}\n"+(f"{node.outputs[0]:.3f}" if node.outputs[0]!=None else "")
-                # node_labels[node] = f"input{i}"
                 node_labels[node] = f"input{i}\n{node.id}"
                 
             fixed_positions[node] = (-4,((i+1)*2.)/len(inputs))
@@ -68,7 +61,6 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
             if not visualize_disabled and node.layer == 999:
                 continue
             G.add_node(node, color=function_colors[node.activation.__name__], shape='o', layer=(node.layer))
-            # node_labels[node] = f"{node.id}\n{node.activation.__name__}\n"+(f"{node.outputs:.3f}" if node.outputs!=None else "" )
             node_labels[node] = f"{node.id}\n{node.activation.__name__}"
 
     for i, node in enumerate(nodes.values()):
@@ -77,16 +69,9 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
                 continue
             title = i
             G.add_node(node, color=function_colors[node.activation.__name__], shape='s', layer=(node.layer))
-            # node_labels[node] = f"M{title}:\n{node.activation.__name__}\n"+(f"{node.outputs:.3f}")
-            # node_labels[node] = f"output{title}:\n{node.activation.__name__}"
             node_labels[node] = f"{node.id}\noutput{title}:\n{node.activation.__name__}"
             fixed_positions[node] = (4, ((i+1)*2)/len(individual.output_nodes()))
     pos = {}
-    # shells = [[node for node in individual.input_nodes()], [node for node in individual.hidden_nodes()], [node for node in individual.output_nodes()]]
-    # pos=nx.shell_layout(G, shells, scale=2)
-    # pos=nx.shell_layout(G, scale=2)
-    # pos=nx.spectral_layout(G, scale=2)
-    # pos=graphviz_layout(G, prog='neato') # neato, dot, twopi, circo, fdp, nop, wc, acyclic, gvpr, gvcolor, ccomps, sccmap, tred, sfdp, unflatten.
     fixed_nodes = fixed_positions.keys()
     if(layout=='multi'):
         pos=nx.multipartite_layout(G, scale=4,subset_key='layer')
@@ -94,11 +79,7 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
         pos=nx.spring_layout(G, scale=4)
 
     plt.figure(figsize=(10, 10))
-    # pos = nx.shell_layout(G)
-    # pos = fixed_positions
-    # pos = nx.spring_layout(G, pos=pos, fixed=fixed_nodes,k=.1,  scale = 2, iterations=2000)
-    # for f, p in fixed_positions.items():
-    #     pos[f] = (p[0]*20, p[1]*20)
+
     shapes = set((node[1]["shape"] for node in G.nodes(data=True)))
     for shape in shapes:
         this_nodes = [sNode[0] for sNode in filter(
@@ -128,7 +109,6 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
 
     edge_colors = nx.get_edge_attributes(G,'color').values()
     edge_styles = shapes = set((s[2] for s in G.edges(data='style')))
-    # use_curved = show_weights or individual.count_layers()<3
     use_curved = curved
     for s in edge_styles:
         edges = [e for e in filter(
@@ -154,135 +134,10 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
     plt.tight_layout()
     if return_fig:
         return plt.gcf()
-        # fig_copy = copy.deepcopy(plt.gcf())
-        # plt.close()
-        
-        return fig_copy
     elif save_name is not None:
         plt.savefig(save_name, format="PNG")
     else:
         plt.show()
-        # plt.close()
-
-def visualize_hn_phenotype_network(individual, visualize_disabled=False, layout='multi', sample=False, show_weights=False, use_inp_bias=False, use_radial_distance=True, save_name=None, extra_text=None):
-    
-    connections = individual.connections
-    node_genome = individual.nodes
-    c = individual.config
-    input_nodes = [n for n in node_genome if n.type == 0]
-    output_nodes = [n for n in node_genome if n.type == 1]
-    hidden_nodes = [n for n in node_genome if n.type == 2]
-    max_weight = c.max_weight
-
-    G = nx.DiGraph()
-    function_colors = {}
-    # colors = ['r', 'g', 'b', 'c', 'm', 'y', 'orange', 'darkviolet',
-    #         'hotpink', 'chocolate', 'lawngreen', 'lightsteelblue']
-    colors = ['lightsteelblue'] * len([node.activation for node in node_genome])
-    node_labels = {}
-
-    node_size = 2000
-    # plt.figure(figsize=(int(1+(individual.count_layers())*1.5), 6), frameon=False)
-    # plt.figure(figsize=(7, 6), frameon=False)
-    plt.subplots_adjust(left=0, bottom=0, right=1.25, top=1.25, wspace=0, hspace=0)
-
-    for i, fn in enumerate([node.activation for node in node_genome]):
-        function_colors[fn.__name__] = colors[i]
-    function_colors["identity"] = colors[0]
-
-    fixed_positions={}
-    inputs = input_nodes
-    
-    for i, node in enumerate(inputs):
-        G.add_node(node, color=function_colors[node.activation.__name__], shape='d', layer=(node.layer))
-        if node.type == 0:
-            node_labels[node] = f"S{i}:\n{node.activation.__name__}\n"+(f"{node.outputs:.3f}" if node.outputs!=None else "")
-        else:
-            node_labels[node] = f"CPG"
-            
-        fixed_positions[node] = (-4,((i+1)*2.)/len(inputs))
-
-    for node in hidden_nodes:
-        G.add_node(node, color=function_colors[node.activation.__name__], shape='o', layer=(node.layer))
-        node_labels[node] = f"{node.id}\n{node.activation.__name__}\n"+(f"{node.outputs:.3f}" if node.outputs!=None else "" )
-
-    for i, node in enumerate(output_nodes):
-        title = i
-        G.add_node(node, color=function_colors[node.activation.__name__], shape='s', layer=(node.layer))
-        node_labels[node] = f"M{title}:\n{node.activation.__name__}\n"+(f"{node.outputs:.3f}")
-        fixed_positions[node] = (4, ((i+1)*2)/len(output_nodes))
-    pos = {}
-    # shells = [[node for node in individual.input_nodes()], [node for node in individual.hidden_nodes()], [node for node in individual.output_nodes()]]
-    # pos=nx.shell_layout(G, shells, scale=2)
-    # pos=nx.shell_layout(G, scale=2)
-    # pos=nx.spectral_layout(G, scale=2)
-    # pos=graphviz_layout(G, prog='neato') # neato, dot, twopi, circo, fdp, nop, wc, acyclic, gvpr, gvcolor, ccomps, sccmap, tred, sfdp, unflatten.
-    fixed_nodes = fixed_positions.keys()
-    if(layout=='multi'):
-        pos=nx.multipartite_layout(G, scale=4,subset_key='layer')
-    elif(layout=='spring'):
-        pos=nx.spring_layout(G, scale=4)
-
-    plt.figure(figsize=(10, 10))
-    # pos = nx.shell_layout(G)
-    # pos = fixed_positions
-    # pos = nx.spring_layout(G, pos=pos, fixed=fixed_nodes,k=.1,  scale = 2, iterations=2000)
-    # for f, p in fixed_positions.items():
-    #     pos[f] = (p[0]*20, p[1]*20)
-    shapes = set((node[1]["shape"] for node in G.nodes(data=True)))
-    for shape in shapes:
-        this_nodes = [sNode[0] for sNode in filter(
-            lambda x: x[1]["shape"] == shape, G.nodes(data=True))]
-        colors = [nx.get_node_attributes(G, 'color')[cNode] for cNode in this_nodes]
-        nx.draw_networkx_nodes(G, pos, node_size=node_size, node_color=colors,
-                            label=node_labels, node_shape=shape, nodelist=this_nodes)
-
-    edge_labels = {}
-    for cx in connections:
-        if(not visualize_disabled and (not cx.enabled or np.isclose(cx.weight, 0))): continue
-        style = ('-', 'k',  .5+abs(cx.weight)/max_weight) if cx.enabled else ('--', 'grey', .5+ abs(cx.weight)/max_weight)
-        if(cx.enabled and cx.weight<0): style  = ('-', 'r', .5+abs(cx.weight)/max_weight)
-        if cx.from_node in G.nodes and cx.to_node in G.nodes:
-            G.add_edge(cx.from_node, cx.to_node, weight=f"{cx.weight:.4f}", pos=pos, style=style)
-        else:
-            print("Connection not in graph:", cx.from_node.id, "->", cx.to_node.id)
-        edge_labels[(cx.from_node, cx.to_node)] = f"{cx.weight:.3f}"
-
-
-    edge_colors = nx.get_edge_attributes(G,'color').values()
-    edge_styles = shapes = set((s[2] for s in G.edges(data='style')))
-    # use_curved = show_weights or individual.count_layers()<3
-
-    for s in edge_styles:
-        edges = [e for e in filter(
-            lambda x: x[2] == s, G.edges(data='style'))]
-        nx.draw_networkx_edges(G, pos,
-                                edgelist=edges,
-                                arrowsize=25, arrows=True, 
-                                node_size=[node_size]*1000,
-                                style=s[0],
-                                edge_color=[s[1]]*1000,
-                                width =s[2],
-                                # connectionstyle= "arc3" if use_curved else "arc3,rad=0.2"
-                                connectionstyle= "arc3"
-                            )
-    
-    if extra_text is not None:
-        plt.text(0.5,0.05, extra_text, horizontalalignment='center', verticalalignment='center', transform=plt.gcf().transFigure)
-        
-    
-    if (show_weights):
-        nx.draw_networkx_edge_labels(G, pos, edge_labels, label_pos=.75)
-    nx.draw_networkx_labels(G, pos, labels=node_labels)
-    plt.tight_layout()
-    if save_name is not None:
-        plt.savefig(save_name, format="PNG")
-        # plt.close()
-    else:
-        plt.show()
-        # plt.close()
-    ""
-    # labels = nx.get_edge_attributes(G,'weight')
 
 def print_net(individual, show_weights=False, visualize_disabled=False):
     print(f"<CPPN {individual.id}")
@@ -352,16 +207,188 @@ def upscale_conv2d(in_channels, out_channels, kernel_size, stride, padding, bias
    )
     return layer
 
-def show_inputs(inputs):
-    cols = 8
-    rows = 1 + inputs.shape[2] // cols
-    fig = plt.figure(figsize=(20,20))
-    for axis in range(inputs.shape[2]):
-        plt.subplot(rows, cols, axis+1)
-        plt.imshow(inputs[:, :, axis].detach().cpu(), cmap="viridis")
-        plt.title(f"Input {axis}")
-        plt.axis("off")
-        plt.tight_layout()
+def show_inputs(inputs, cols=8):
+    if not isinstance(inputs, torch.Tensor):
+        # assume it's an algorithm instance
+        inputs = inputs.inputs
+        try:
+            inputs = handle_normalization(inputs, inputs.config.normalize_outputs)
+        except:
+            pass # no normalization
+    inputs = inputs.permute(2,0,1)
+    image_grid(inputs,
+               cols=cols,
+               show=True,
+               cmap='viridis',
+               suptitle="Inputs")
+
+
+def image_grid(images,
+                cols=4,
+                titles=None,
+                show=True,
+                cmap='gray',
+                suptitle=None,
+                title_font_size=12,
+                fig_size=(10,10)):
+    
+    if isinstance(images, torch.Tensor):
+        images = images.detach().cpu().numpy()
+        images = [i for i in images]
+    fg = plt.figure(constrained_layout=True, figsize=fig_size)
+    rows = 1 + len(images) // cols
+    for i, img in enumerate(images):
+        ax = fg.add_subplot(rows, cols, i + 1)
+        ax.axis('off')
+        ax.imshow(img, cmap=cmap, vmin=0, vmax=1)
+        if titles is not None:
+            ax.set_title(titles[i])
+    if suptitle is not None:
+        fg.suptitle(suptitle, fontsize=title_font_size)
+    if show:
+        fg.show()
+    else:
+        return plt.gcf()
+
+
+def custom_image_grid(images:Union[torch.Tensor, np.ndarray, List[torch.Tensor]],
+               cols=8, titles=None, show=True, cmap="gray"):
+    assert titles is None or len(titles) == len(images)
+    if isinstance(images, List):
+        images = torch.stack(images).detach().cpu()
+    elif isinstance(images, np.ndarray):
+        ...
+    elif isinstance(images, torch.Tensor):
+        images = images.detach().cpu()
+    
+    num = images.shape[0]
+    
+    rows = math.ceil(num / cols)
+    fig, axs = plt.subplots(rows, cols, constrained_layout=True, figsize=(cols*2, rows*2))
+    for i, ax in enumerate(axs.flatten()):
+        ax.axis("off")
+        if i >= num:
+            ax.imshow(np.ones((num, images.shape[1], 3)), cmap="gray")
+        else:    
+            ax.imshow(images[:, :, i], cmap=cmap, vmin=0, vmax=1)
+            if titles is not None:
+                ax.set_title(f"Input {titles[i]}")
+    if show:
+        fig.tight_layout()
+        fig.show()
+    return fig
+        
+ 
+
+
+
+def visualize_node_outputs(net, inputs):
+    batch_size = 1 
+    
+    if inputs is None:
+        inputs = type(net).constant_inputs
+
+    res_h = inputs.shape[0]
+    res_w = inputs.shape[1]
+    
+    # reset the activations to 0 before evaluating
+    net.reset_activations()
+    
+    node_outputs = {}
+    
+    # get layers
+    layers = feed_forward_layers(net) 
+    layers.insert(0, net.input_nodes().keys()) # add input nodes as first layer
+    
+    # iterate over layers
+    for layer in layers:
+        Xs, Ws, nodes, Fns = [], [], [], []
+        for node_index, node_id in enumerate(layer):
+            # iterate over nodes in layer
+            node = net.node_genome[node_id] # the current node
+            
+            if node.type == NodeType.INPUT:
+                # initialize the node's sum
+                X = inputs[:,:,node_index].repeat(batch_size, 1, 1, 1) # (batch_size, cx, res_h, res_w)
+                weights = torch.ones((1), dtype=net.config.dtype, device=net.device)
+            else:
+                # find incoming connections and activate
+                X, weights = get_incoming_connections_weights(net, node)
+                # X shape = (batch_size, num_incoming, res_h, res_w)
+                if X is None:
+                    X = torch.zeros((batch_size, 1, res_h, res_w), dtype=net.config.dtype, device=net.device)
+                if weights is None:
+                    weights = torch.ones((1), dtype=net.config.dtype, device=net.device)
+
+            node.activate(X, weights) # naive
+            node_outputs[node.id] = node.outputs.clone().detach().cpu().squeeze(0)
+            
+    # collect outputs from the last layer
+    sorted_o = sorted(net.output_nodes().values(), key=lambda x: x.key, reverse=True)
+    outputs = torch.stack([node.outputs for node in sorted_o], dim=1)
+    assert str(outputs.device) == str(net.device), f"Output is on {outputs.device}, should be {net.device}"
+
+    net.outputs = outputs
+    # net._pre_post_outputs = net.outputs.clone()
+    
+    from matplotlib import colors
+    import matplotlib.pyplot as plt
+    import networkx as nx
+    from networkx.drawing.nx_agraph import graphviz_layout
+    fig = plt.figure(figsize=(30,30))
+    G = net.to_networkx()
+    pos = graphviz_layout(G, prog='dot', args="-Grankdir=LR")
+    ax=plt.gca()
+    fig=plt.gcf()
+    imsize = 0.03 # this is the image size
+    nx.draw_networkx(
+        G,
+        with_labels=True,
+        pos=pos,
+        labels={n:f"{n}\n{net.node_genome[n].activation.__name__[:4]}" for n in G.nodes(data=False) },
+        node_size=6000,
+        font_size=6,
+        node_shape='s',
+        node_color=['lightsteelblue' if n in net.node_genome else 'lightgreen' for n in G.nodes()  ]
+        )
+    plt.annotate('# params: ' + str(net.num_params), xy=(1.0, 1.0), xycoords='axes fraction', fontsize=12, ha='right', va='top')
+    # plt.show()
+    trans = ax.transData.transform
+    trans2 = fig.transFigure.inverted().transform
+    for n in G.nodes():
+        if not n in node_outputs.keys():
+            continue
+        (x,y) = pos[n]
+        xx,yy = trans((x,y)) # figure coordinates
+        xa,ya = trans2((xx,yy)) # axes coordinates
+        a = plt.axes([xa-imsize/2.0,ya-imsize/2.0, imsize, imsize ])
+        
+        color = 'gray'
+        if net.config.color_mode == 'RGB':
+            S = sorted(net.output_nodes().keys(), reverse=True)
+            if n in S:
+                idx = S.index(n)
+                if idx == 0:
+                    color =  colors.LinearSegmentedColormap.from_list('mycmap', ['black', 'red'])
+                elif idx == 1:
+                    color =  colors.LinearSegmentedColormap.from_list('mycmap', ['black', 'green'])
+                elif idx == 2:
+                    color =  colors.LinearSegmentedColormap.from_list('mycmap', ['black', 'blue'])
+
+            
+        a.imshow(node_outputs[n], cmap=color)
+        a.set_aspect('equal')
+        a.axis('off')
     plt.show()
+        
+        
+        
+        
+def resize(img, size):
+    return cv2_resize(img, size)
 
-
+def center_crop(img, r, c):
+    h, w = img.shape[:2]
+    r1 = int(round((h - r) / 2.))
+    c1 = int(round((w - c) / 2.))
+    return img[r1:r1 + r, c1:c1 + c]

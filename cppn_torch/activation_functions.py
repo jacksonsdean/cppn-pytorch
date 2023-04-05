@@ -17,7 +17,7 @@ def identity(x):
 
 def sigmoid(x):
     """Returns the sigmoid of the input."""
-    return 1/(1 + torch.exp(-x))
+    return torch.sigmoid(x)
 
 def tanh(x):
     """Returns the hyperbolic tangent of the input."""
@@ -70,10 +70,20 @@ def cos(x):
     y =  torch.cos(x*math.pi)
     return y
 
-def gauss(x):
+def gauss(x, mean=0.0, std=1.0):
     """Returns the gaussian of the input."""
-    y = 2*torch.exp(-20.0 * (x) ** 2)-.5
+    y = 2*torch.exp(-6.0 * (x-mean) ** 2/std**2)-1.0 
     return y
+
+# def gauss(x, mean=0.0, std=1.0):
+#     """Returns the gaussian of the input."""
+#     y = 2*torch.exp(-20.0 * (x-mean) ** 2/std**2)-1.0
+#     return y
+
+# def gauss(x , mean=0.0 , sd=1.0):
+#     prob_density = (torch.pi*sd) * torch.exp(-0.5*((x-mean)/sd)**2)
+#     return prob_density
+
 
 def triangle(X):
     return 1 - 2 *torch.arccos((1 - .0001) * torch.sin(2 * torch.pi * X))/torch.pi
@@ -81,3 +91,16 @@ def square(X):
     return 2* torch.arctan(torch.sin(2 *torch.pi* X)/.0001)/torch.pi
 def sawtooth(X):
     return (1 + triangle((2*X - 1)/4.0) * square(X/2.0)) / 2.0
+
+
+def softsign(x):
+    return x / (1 + torch.abs(x))
+
+def softplus(x):
+    return torch.log(1 + torch.exp(x))
+
+def tanh_softsign(x):
+    return softsign(tanh(x))
+
+def tanh_softsign_norm(x):
+    return 0.5+tanh_softsign(x)

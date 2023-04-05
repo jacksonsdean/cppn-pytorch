@@ -19,7 +19,7 @@ class TestPopulation(unittest.TestCase):
         num = 400
         
         config = CPPNConfig()
-        config.normalize_outputs = True
+        config.normalize_outputs = 'min_max'
         config.set_res(res)
         config.seed = seed
         const_inputs = ImageCPPN.initialize_inputs(
@@ -34,7 +34,7 @@ class TestPopulation(unittest.TestCase):
         
         # original
         config = CPPNConfig()
-        config.normalize_outputs = True
+        config.normalize_outputs = 'min_max'
         config.set_res(res)
         config.seed = seed
         

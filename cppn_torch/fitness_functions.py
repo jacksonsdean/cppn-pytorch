@@ -61,9 +61,9 @@ def correct_dims(candidates, target):
    
    # pad to 32x32 if necessary
    if f.shape[2] < 32 or f.shape[3] < 32:
-      f = Resize((32,32))(f)
+      f = Resize((32,32),antialias=True)(f)
    if r.shape[2] < 32 or r.shape[3] < 32:
-      r = Resize((32,32))(r)
+      r = Resize((32,32),antialias=True)(r)
 
    if f.shape[0] !=1 and r.shape[0] == 1:
       # only one target in batch, repeat for comparison
@@ -247,7 +247,7 @@ def content(candidates, target):
 def pieAPP(candidates, target):
    assert_images(candidates, target)
    # candidates, target = correct_dims(candidates, target)
-   candidates,target = Resize((128,128))(candidates), Resize((128,128))(target)
+   candidates,target = Resize((128,128),antialias=True)(candidates), Resize((128,128),antialias=True)(target)
    loss = piq.PieAPP(reduction='none', stride=32)(candidates, target)
    value = torch.tensor([1.0]*len(candidates)).to(loss) - loss
    return value
@@ -272,7 +272,7 @@ def psnr(candidates, target):
 def vif(candidates, target):
    assert_images(candidates, target)
    # candidates, target = correct_dims(candidates, target)
-   candidates, target = Resize((41,41))(candidates), Resize((41,41))(target)
+   candidates, target = Resize((41,41),antialias=True)(candidates), Resize((41,41),antialias=True)(target)
    value = piq.vif_p(candidates, target, data_range=1.0, reduction='none')
    return value
 
@@ -285,7 +285,7 @@ def vsi(candidates, target):
 def srsim(candidates, target):
    assert_images(candidates, target)
    # candidates, target = correct_dims(candidates, target)
-   candidates, target = Resize((161,161))(candidates), Resize((161,161))(target)
+   candidates, target = Resize((161,161),antialias=True)(candidates), Resize((161,161),antialias=True)(target)
    value = piq.srsim(candidates, target, data_range=1.0, reduction='none')
    return value
 
