@@ -7,6 +7,7 @@ available_normalizations = [
             "neat",
             "inv_neat",
             "sqr_neat",
+            "clamp",
             "sigmoid",
             "sigmoid_like",
             "min_max_sigmoid_like",
@@ -30,7 +31,7 @@ available_normalizations = [
             "min_max_sqr_imagenet",
             "neat_sqr_imagenet",
             "softsign",
-            "tanh_softsign",
+            "tanh_softsign"
             ]
 
 
@@ -120,6 +121,8 @@ def handle_normalization(X, norm, imagenet_norm=None):
         X = 1.0-norm_neat(X)
     elif norm == "sqr_neat":
         X = norm_neat(X**2)
+    elif norm == "clamp":
+        X = torch.clamp(X, 0, 1)
     elif norm == "sigmoid":
         X = torch.sigmoid(X)
     elif norm == "sigmoid_like":

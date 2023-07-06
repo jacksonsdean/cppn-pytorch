@@ -2,17 +2,27 @@ from cppn_torch.activation_functions import gauss
 
 # from https://github.com/tancik/fourier-feature-networks
 import torch
-
+import numpy as np
 def apply_mapping(x, B:torch.tensor):
-  if B is None:
-    return x
-  else:
-    x_proj = (2.*torch.pi*x) @ B.T
-    f0 = torch.sin(x_proj)
+    if B is None:
+      return x
+    else:
+      device = x.device
+      x = x.cpu().numpy()
+      B = B.cpu().numpy()
+      x_proj = (2.*np.pi*x) @ B.T
+      result = np.concatenate([np.sin(x_proj), np.cos(x_proj)], axis=-1)
+      return torch.tensor(result, device=device).float()
+
+    
+    # x_proj = (2.*torch.pi*x) @ B.T
+    # f0 = torch.sin(x_proj)
+    # # return torch.cat([f0], dim=-1)
     # f1 = torch.cos(x_proj)
-    return torch.cat([f0], dim=-1)
+    # return torch.cat([f0,f1], dim=-1)
 
 def input_mapping(x, b_scale:float, mapping_size:int, dims:int=2):
+    mapping_size = mapping_size // 2
     B_gauss = torch.randn((mapping_size, dims), device=x.device)
     B_gauss = B_gauss * b_scale
     return apply_mapping(x, B_gauss)

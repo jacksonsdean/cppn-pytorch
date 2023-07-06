@@ -19,6 +19,15 @@ def sigmoid(x):
     """Returns the sigmoid of the input."""
     return torch.sigmoid(x)
 
+def sigmoid_no_grad(x):
+    """Returns the sigmoid of the input."""
+    # Can have NaN in gradient
+    return ((1.0 / (1.0 + torch.exp(-x))) - 0.5) * 2.0
+
+def linear(x):
+    """Returns the linear of the input."""
+    return torch.minimum(torch.maximum(x, torch.tensor(-3.0)), torch.tensor(3.0)) / 3.0
+
 def tanh(x):
     """Returns the hyperbolic tangent of the input."""
     y = torch.tanh(2.5*x)
@@ -62,7 +71,8 @@ def elu(x):
 @torch.enable_grad()
 def sin(x):
     """Returns the sine of the input."""
-    y =  torch.sin(x*math.pi)
+    # y =  torch.sin(x*math.pi)
+    y =  torch.sin(x)
     return y
 
 def cos(x):
@@ -70,10 +80,12 @@ def cos(x):
     y =  torch.cos(x*math.pi)
     return y
 
-def gauss(x, mean=0.0, std=1.0):
-    """Returns the gaussian of the input."""
-    y = 2*torch.exp(-6.0 * (x-mean) ** 2/std**2)-1.0 
-    return y
+# def gauss(x, mean=0.0, std=1.0):
+#     """Returns the gaussian of the input."""
+#     y = 2*torch.exp(-6.0 * (x-mean) ** 2/std**2)-1.0 
+    # return y
+def gauss(x):
+    return torch.exp(-torch.pow(x, 2))
 
 # def gauss(x, mean=0.0, std=1.0):
 #     """Returns the gaussian of the input."""

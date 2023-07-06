@@ -46,7 +46,12 @@ def name_to_fn(name):
         return None
     fns = inspect.getmembers(sys.modules[af.__name__])
     fns.extend(inspect.getmembers(sys.modules[ff.__name__]))
-    return fns[[f[0] for f in fns].index(name)][1]
+    
+    fns.extend([("round", lambda x: torch.round(x))])
+    try:
+        return fns[[f[0] for f in fns].index(name)][1]
+    except ValueError:
+        raise ValueError(f"Function {name} not found.")
 
 
 def choose_random_function(generator, config) -> Callable:
@@ -136,7 +141,8 @@ def get_incoming_connections_weights(individual, node):
     cxs = list(filter(lambda x, n=node: x.key[1] == n.id, individual.enabled_connections())) 
     if len(cxs) == 0:
         return None, None
-    if None in [individual.node_genome[c.key[0]].outputs for c in cxs]:
+    if None in [individual.node_genome[c.key[0]].outputs for c in cxs if c.key[0] in individual.node_genome]:
+        print("None in inputs")
         print(individual.id, [individual.node_genome[c.key[0]].outputs for c in cxs])
         print(list(individual.enabled_connections()))
     weights = torch.stack([cx.weight for cx in cxs]).to(individual.device)

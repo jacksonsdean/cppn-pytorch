@@ -50,7 +50,7 @@ class ImageCPPN(CPPN):
         # decide if we need to recalculate the image
         recalculate = False
         recalculate = recalculate or force_recalculate
-        if isinstance(self.outputs, torch.Tensor):
+        if hasattr(self, "outputs") and isinstance(self.outputs, torch.Tensor):
             assert self.outputs is not None
             if len(self.config.color_mode) == 3:
                 if (channel_first and not torch.argmin(torch.tensor(self.outputs.shape)).item() == 0):
@@ -81,7 +81,7 @@ class ImageCPPN(CPPN):
         else:
             # whole image at once (100sx faster)
             self.outputs = self.forward(inputs=inputs, extra_inputs=extra_inputs, no_aot=no_aot, channel_first=channel_first)
-
+       
         assert self.outputs.dtype == torch.float32, f"Image is {self.outputs.dtype}, should be float32"
         assert str(self.outputs.device) == str(self.device), f"Image is on {self.outputs.device}, should be {self.device}"
         return self.outputs
@@ -115,6 +115,10 @@ class ImageCPPN(CPPN):
             Extra inputs are (batch_size, num_extra_inputs)
         """
         assert self.config is not None, "Config is None."
+        
+        # if self.device!=inputs.device:
+        #     self.to(inputs.device) # breaks computation graph
+        
         
         batch_size = 1 if extra_inputs is None else extra_inputs.shape[0]
         res_h, res_w = self.config.res_h, self.config.res_w
@@ -181,7 +185,8 @@ class ImageCPPN(CPPN):
         assert self.config is not None, "Config is None."
         assert self.config.normalize_outputs, "normalize_outputs is False or None"
         
-        self.outputs = handle_normalization(self.outputs, self.config.normalize_outputs, self.imagenet_norm)
+        if self.config.normalize_outputs:
+            self.outputs = handle_normalization(self.outputs, self.config.normalize_outputs, self.imagenet_norm)
             
         if self.config.color_mode == 'HSL':
             # assume output is HSL and convert to RGB

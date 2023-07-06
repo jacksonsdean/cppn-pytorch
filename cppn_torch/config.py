@@ -30,6 +30,7 @@ class CPPNConfig:
         self.sgd_steps = 100 # batch size is 1
         self.num_upsamples = 0
         self.num_conv=0
+        self.num_post_conv=0
         self.dry_run = False
         self.res_w = 28
         self.res_h = 28
@@ -40,8 +41,9 @@ class CPPNConfig:
         
         self.allow_recurrent = False
         self.init_connection_probability = 0.85
+        self.dense_init_connections = False
         self.activations = get_all()
-        self.normalize_outputs = 'picbreeder' # None, "picbreeder", "sigmoid", 'min_max', 'abs_tanh'
+        self.normalize_outputs = False # None, "picbreeder", "sigmoid", 'min_max', 'abs_tanh'
         self.node_agg = 'sum'
         
         self.genome_type = None # algorithm default
@@ -66,6 +68,8 @@ class CPPNConfig:
         self.prob_add_node = .15 # 0.03 in original NEAT
         self.prob_remove_node = 0.05
         self.prob_disable_connection = .05
+        
+        self.initial_mutations = 0 
 
         self.bias_mutation_std = .30
         self.prob_mutate_bias = .80
@@ -78,7 +82,7 @@ class CPPNConfig:
         self.prob_weight_reinit = 0.1 * .80 # .1 in the original NEAT (.1 of .8)
         self.prob_reenable_connection = 0.1
         self.coord_range = (-0.5, 0.5)
-        self.output_activation = None
+        self.output_activation = softplus
         self.target_resize = None # use original size
         
         self.output_dir = None

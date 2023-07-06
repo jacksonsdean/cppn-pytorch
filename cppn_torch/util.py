@@ -295,10 +295,18 @@ def visualize_node_outputs(net, inputs):
     net.reset_activations()
     
     node_outputs = {}
-    
+ 
     # get layers
     layers = feed_forward_layers(net) 
     layers.insert(0, net.input_nodes().keys()) # add input nodes as first layer
+    
+    for i, p_layer in enumerate(net.pre_layers):
+        inputs = inputs.permute(2,0,1)
+        inputs = p_layer(inputs)
+        inputs = torch.relu(inputs)
+        inputs = inputs.permute(1, 2, 0)
+        
+        node_outputs[net.layer_to_str(p_layer, i)] = inputs.clone().detach().cpu().squeeze(0)
     
     # iterate over layers
     for layer in layers:
@@ -321,6 +329,7 @@ def visualize_node_outputs(net, inputs):
                     weights = torch.ones((1), dtype=net.config.dtype, device=net.device)
 
             node.activate(X, weights) # naive
+            print("activate", node.id, node.outputs.shape)
             node_outputs[node.id] = node.outputs.clone().detach().cpu().squeeze(0)
             
     # collect outputs from the last layer
@@ -328,6 +337,15 @@ def visualize_node_outputs(net, inputs):
     outputs = torch.stack([node.outputs for node in sorted_o], dim=1)
     assert str(outputs.device) == str(net.device), f"Output is on {outputs.device}, should be {net.device}"
 
+    for i, layer in enumerate(net.post_layers):
+        if isinstance(layer, torch.nn.Linear):
+            outputs = outputs.reshape(outputs.shape[0], -1)
+        outputs = layer(outputs)
+        outputs = torch.relu(outputs)
+        if isinstance(layer, torch.nn.Linear):
+            outputs = outputs.reshape(outputs.shape[0], len(net.config.color_mode), net.config.res_h, net.config.res_w)
+        node_outputs[net.layer_to_str(layer, i)] = outputs.clone().detach().cpu().squeeze(0).permute(1, 2, 0)
+            
     net.outputs = outputs
     # net._pre_post_outputs = net.outputs.clone()
     
@@ -336,7 +354,7 @@ def visualize_node_outputs(net, inputs):
     import networkx as nx
     from networkx.drawing.nx_agraph import graphviz_layout
     fig = plt.figure(figsize=(30,30))
-    G = net.to_networkx()
+    G = net.to_nx()
     pos = graphviz_layout(G, prog='dot', args="-Grankdir=LR")
     ax=plt.gca()
     fig=plt.gcf()
@@ -345,7 +363,8 @@ def visualize_node_outputs(net, inputs):
         G,
         with_labels=True,
         pos=pos,
-        labels={n:f"{n}\n{net.node_genome[n].activation.__name__[:4]}" for n in G.nodes(data=False) },
+        labels={n:f"{n}\n{net.node_genome[n].activation.__name__[:4]}\n{1}xHxW"if n in net.node_genome else n
+                    for n in G.nodes(data=False) },
         node_size=6000,
         font_size=6,
         node_shape='s',
@@ -357,6 +376,7 @@ def visualize_node_outputs(net, inputs):
     trans2 = fig.transFigure.inverted().transform
     for n in G.nodes():
         if not n in node_outputs.keys():
+            print(f"Node {n} not in node_outputs")
             continue
         (x,y) = pos[n]
         xx,yy = trans((x,y)) # figure coordinates
@@ -375,10 +395,30 @@ def visualize_node_outputs(net, inputs):
                 elif idx == 2:
                     color =  colors.LinearSegmentedColormap.from_list('mycmap', ['black', 'blue'])
 
+        img = node_outputs[n]
+        if len(img.shape)<=2 or img.shape[-1] <= 3:
+            a.imshow(img, cmap=color)
+            a.set_aspect('equal')
+            a.axis('off')
+        else:
+            # multiple channels:
+            print('multiple channels')
+            print(img.shape)
+            num_channels = img.shape[-1]
+            size = imsize/np.sqrt(num_channels)
+            rows = int(np.ceil(np.sqrt(num_channels)))
+            cols = int(np.ceil(num_channels / rows))
+            # start at top left and move right/down
             
-        a.imshow(node_outputs[n], cmap=color)
-        a.set_aspect('equal')
-        a.axis('off')
+            for i in range(num_channels):
+                r = i // cols
+                c = i % cols
+                a = plt.axes([(xa+c*size)- imsize/2.0,(ya+r*size)- imsize/2.0, size, size ])
+                a.set_aspect('equal')
+                a.axis('off')
+                a.imshow(img[:,:,i], cmap=color)
+                a.set_aspect('equal')
+                a.axis('off')
     plt.show()
         
         

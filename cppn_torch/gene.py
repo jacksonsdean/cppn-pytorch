@@ -90,11 +90,18 @@ class Node(Gene):
             self.outputs = self.outputs.cpu()
         if self.bias is not None:
             self.bias = self.bias.cpu()
+    def to_cuda(self, device):
+        if self.sum_inputs is not None:
+            self.sum_inputs = self.sum_inputs.cuda(device)
+        if self.outputs is not None:
+            self.outputs = self.outputs.cuda(device)
+        if self.bias is not None:
+            self.bias = self.bias.cuda(device)
 
     def activate(self, X, W):
         """Activates the node given a list of connections that end here."""
         assert isinstance(self.activation, Callable), "activation function is not a function"
-
+    
         if X is None:
             return
         if W is None:
@@ -207,6 +214,10 @@ class Connection(Gene):
     def to_cpu(self):
         assert isinstance(self.weight, torch.Tensor), "weight is not a tensor"
         self.weight = self.weight.cpu()
+        
+    def to_cuda(self, device):
+        assert isinstance(self.weight, torch.Tensor), "weight is not a tensor"
+        self.weight = self.weight.cuda(device)
 
     def to_json(self):
         """Converts the connection to a json string."""

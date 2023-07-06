@@ -13,7 +13,7 @@ import torch
 from torch.nn import ConvTranspose2d, Conv2d
 import networkx as nx
 import logging
-
+from torch import nn
 from functorch.compile import compiled_function, draw_graph, aot_function
 from cppn_torch.activation_functions import identity
 from cppn_torch.graph_util import *
@@ -35,6 +35,47 @@ def random_choice(generator, choices, count, replace):
         return output
     else:
         return choices[torch.randint(len(choices), (count,), generator=generator)]
+
+
+class Block(nn.Module):
+    # TODO: batch norm bad idea for small batch sizes
+    def __init__(self, in_channels, out_channels, stride=1):
+        """
+        Args:
+          in_channels (int):  Number of input channels.
+          out_channels (int): Number of output channels.
+          stride (int):       Controls the stride.
+        """
+        super(Block, self).__init__()
+
+        self.skip = nn.Sequential()
+
+        if stride != 1 or in_channels != out_channels:
+          self.skip = nn.Sequential(
+            # nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride, bias=False),
+            upscale_conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=0, bias=False),
+            # nn.BatchNorm2d(out_channels),
+            )
+        else:
+          self.skip = None
+
+        self.block = nn.Sequential(
+            # nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1, stride=1, bias=False),
+            # nn.BatchNorm2d(out_channels),
+            # nn.ReLU(),
+            # nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1, stride=1, bias=False),
+            # nn.BatchNorm2d(out_channels),
+            upscale_conv2d(out_channels, out_channels, kernel_size=5, stride=1, padding=1, bias=False),
+            # nn.ReLU()
+            
+            )
+        
+
+    def forward(self, x):
+        out = self.block(x)
+        # out += (x if self.skip is None else self.skip(x))
+        # out = torch.nn.functional.relu(out)
+        return out
 
 class CPPN():
     """A CPPN Object with Nodes and Connections."""
@@ -67,6 +108,7 @@ class CPPN():
         # assign values:
         type.constant_inputs[:, :, 0] = y_vals.unsqueeze(1).repeat(1, res_w)
         type.constant_inputs[:, :, 1] = x_vals.unsqueeze(0).repeat(res_h, 1)
+            
         
         if use_radial_dist:
             # d = sqrt(x^2 + y^2)
@@ -74,6 +116,12 @@ class CPPN():
         if use_bias:
             type.constant_inputs[:, :, -1] = torch.ones((res_h, res_w), dtype=dtype, device=device, requires_grad=False) # bias = 1.0
         
+        repeat_dims = 2 # just y, x
+        if use_radial_dist:
+            repeat_dims += 1 # add radial dist
+        n_repeats = 0   
+        for i in range(n_repeats):
+            type.constant_inputs  = torch.cat((type.constant_inputs, type.constant_inputs[:, :, :repeat_dims]), dim=2)
         
         return type.constant_inputs
 
@@ -129,11 +177,14 @@ class CPPN():
         self.n_in_nodes = self.config.num_inputs
         
         if self.config.num_conv > 0:
-            self.pre_layers.append(Conv2d(self.config.num_inputs , 3, kernel_size=3, stride=1, padding=1, bias=True).to(self.device))
+            last_c = 8
+            self.pre_layers.append(Conv2d(self.config.num_inputs, last_c, kernel_size=5, stride=1, padding=2, bias=False).to(self.device))
+            self.pre_layers[-1] = self.pre_layers[-1].to(self.device)
             for _ in range(self.config.num_conv-1):
-                self.pre_layers.append(Conv2d(3,3, kernel_size=3, stride=1, padding=1, bias=True))
+                self.pre_layers.append(Conv2d(last_c, 3, kernel_size=5, stride=1, padding=2, bias=False))
+                last_c = 3
                 self.pre_layers[-1] = self.pre_layers[-1].to(self.device)
-            self.n_in_nodes = 3
+            self.n_in_nodes = last_c
             
         if nodes is None:
             self.initialize_node_genome()
@@ -144,10 +195,21 @@ class CPPN():
         else:
             self.connection_genome = connections
         
+        F = 3
+        S = 1
+        P = 1
+        
         
         self.post_layers = []
+        num_channels = len(self.config.color_mode)
+        flat_size = self.config.res_h*self.config.res_w*num_channels
+        
         for _ in range(self.config.num_upsamples):
-            self.post_layers.append(upscale_conv2d(3,3, kernel_size=3, stride=1, padding=0, bias=True))
+            self.post_layers.append(Block(num_channels, num_channels))
+            self.post_layers[-1] = self.post_layers[-1].to(self.device)
+     
+        for _ in range(self.config.num_post_conv):
+            self.post_layers.append(nn.Conv2d(num_channels, num_channels, kernel_size=3, stride=1, padding=1, bias=True))
             self.post_layers[-1] = self.post_layers[-1].to(self.device)
         
         self.config._not_dirty()
@@ -206,14 +268,31 @@ class CPPN():
     def params(self):
         return self.get_params()
     
+    def get_cppn_params(self):
+        params = []
+        required_nodes = required_for_output(*get_ids_from_individual(self))
+        
+        # cxs that end at a required node
+        required_cxs = set()
+        for node_id in required_nodes:
+            for cx in self.connection_genome.values():
+                if cx.enabled and cx.key[1] == node_id:
+                    required_cxs.add(cx.key)
+        
+        for cx in self.connection_genome.values():
+            if cx.enabled and cx.key in required_cxs:
+                params.append(cx.weight)
+       
+        # for n in self.node_genome.values():
+        #     if n.key in required_nodes:
+        #         params.append(n.bias)
+        
+        return params
+    
     def get_params(self):
         """Returns a list of all parameters in the network."""
-        params = []
-        for cx in self.connection_genome.values():
-            params.append(cx.weight)
-        for n in self.node_genome.values():
-            params.append(n.bias)
-
+        params = self.get_cppn_params()
+        params.extend(self.get_pre_params())
         params.extend(self.get_post_params())
         return params
     
@@ -232,26 +311,41 @@ class CPPN():
     
     @property
     def num_params(self):
-        return len(self.get_params())
+        cppn_len = len(self.get_cppn_params())
+        for layer in self.pre_layers:
+            for p in layer.parameters():
+                cppn_len += p.numel()
+        for layer in self.post_layers:
+            for p in layer.parameters():
+                cppn_len += p.numel()
+        return cppn_len
 
     def get_named_params(self):
         """Returns a dict of all parameters in the network."""
         params = {}
         for cx in self.connection_genome.values():
-            params[f"w_{cx.key}"] = cx.weight
+            if cx.enabled:
+                params[f"w_{cx.key}"] = cx.weight
         return params
 
-    def prepare_optimizer(self, opt_class=torch.optim.Adam, lr=None):
+    def prepare_optimizer(self, opt_class=torch.optim.Adam, lr=None, create_opt = False):
         """Prepares the optimizer."""
         assert self.config is not None, "Config is None."
         if lr is None:
             lr = self.config.sgd_learning_rate
-        self.outputs = None
+        self.outputs = None # reset output
+        
+        # make a new computation graph
         for cx in self.connection_genome.values():
-            cx.weight = cx.weight.detach()
-            cx.weight = torch.nn.Parameter(torch.tensor(cx.weight.item(), requires_grad=True, dtype=self.config.dtype))
-        self.optimizer = opt_class([cx.weight for cx in self.connection_genome.values()], lr=lr)
-
+            if cx.enabled:
+                cx.weight = torch.nn.Parameter(torch.tensor(cx.weight.detach().item(), requires_grad=True, dtype=self.config.dtype))
+        # exit()
+        if create_opt:
+            self.optimizer = opt_class(self.get_params(), lr=lr)
+            return self.optimizer
+        else:
+            return self.get_params()
+    
     def initialize_connection_genome(self):
         """Initializes the connection genome."""
         assert self.config is not None, "Config is None."
@@ -267,6 +361,16 @@ class CPPN():
                             self.connection_genome[new_cx.key] = new_cx
                             if torch.rand(1)[0] > self.config.init_connection_probability:
                                 new_cx.enabled = False
+        
+        # also connect inputs to outputs directly:
+        if self.config.dense_init_connections and self.config.hidden_nodes_at_start > 0:
+            for from_node in self.get_layer(0):
+                for to_node in self.get_layer(output_layer_idx):
+                    new_cx = Connection(
+                        (from_node.id, to_node.id), self.random_weight())
+                    self.connection_genome[new_cx.key] = new_cx
+                    if torch.rand(1)[0] > self.config.init_connection_probability:
+                        new_cx.enabled = False
         
     def serialize(self):
         # del type(self).constant_inputs
@@ -423,7 +527,7 @@ class CPPN():
             elif R_reset[i] < self.config.prob_weight_reinit:
                 connection.weight = self.random_weight()
 
-        self.clamp_weights()
+        # self.clamp_weights()
         self.outputs = None # reset the image
 
     def mutate_bias(self, prob):
@@ -595,6 +699,33 @@ class CPPN():
         self.disable_invalid_connections()
         self.outputs = None # reset the image
 
+    def prune(self):
+        removed = 0
+        for cx in list(self.connection_genome.values())[::-1]:
+            if abs(cx.weight )< self.config.prune_threshold:
+                del self.connection_genome[cx.key]
+                removed += 1
+        for _ in range(self.config.min_pruned - removed):
+            min_weight_key = min(self.connection_genome, key=lambda k: self.connection_genome[k].weight)
+            removed += 1
+            del self.connection_genome[min_weight_key]
+       
+        # remove nodes with no connections
+        all_keys = []
+        all_keys.extend([cx.key[0] for cx in self.connection_genome.values()])
+        all_keys.extend([cx.key[1] for cx in self.connection_genome.values()])
+
+        for node in list(self.node_genome.values())[::-1]:
+            if node.id not in all_keys:
+                del self.node_genome[node.id]
+        
+        # print("Pruned {} connections".format(removed))
+        
+        self.update_node_layers()
+        self.disable_invalid_connections()
+        self.outputs = None # reset the image
+
+    
     def disable_connection(self):
         """Disables a connection."""
         eligible_cxs = list(self.enabled_connections())
@@ -692,6 +823,10 @@ class CPPN():
 
     def forward_(self, inputs=None, extra_inputs=None, channel_first=True):
         # TODO: channel_first is ignored for now
+        
+        if self.device!=inputs.device:
+            self.to(inputs.device) # breaks computation graph
+        
         assert self.config is not None, "Config is None."
         
         batch_size = 1 if extra_inputs is None else extra_inputs.shape[0]
@@ -704,10 +839,10 @@ class CPPN():
         
         if inputs is None:
             inputs = type(self).constant_inputs
-
         for p_layer in self.pre_layers:
             inputs = inputs.permute(2,0,1)
             inputs = p_layer(inputs)
+            inputs = torch.relu(inputs)
             inputs = inputs.permute(1, 2, 0)
 
         # reset the activations to 0 before evaluating
@@ -756,10 +891,15 @@ class CPPN():
         assert str(outputs.device) == str(self.device), f"Output is on {outputs.device}, should be {self.device}"
 
         self.outputs = outputs
-        # self._pre_post_outputs = self.outputs.clone()
-        
         for layer in self.post_layers:
+            if isinstance(layer, torch.nn.Linear):
+                self.outputs = self.outputs.reshape(self.outputs.shape[0], -1)
             self.outputs = layer(self.outputs)
+            # self.outputs = torch.relu(self.outputs)
+            if isinstance(layer, torch.nn.Linear):
+                self.outputs = self.outputs.reshape(self.outputs.shape[0], len(self.config.color_mode), self.config.res_h, self.config.res_w)
+                
+                
         assert str(self.outputs.device )== str(self.device), f"Output is on {self.outputs.device}, should be {self.device}"
         assert self.outputs.dtype == torch.float32, f"Output is {self.outputs.dtype}, should be float32"
         return self.outputs
@@ -928,7 +1068,7 @@ class CPPN():
             
     def compress(self, path):
         """Save the genome as a compressed numpy file."""
-        self.to_cpu()
+        self.cpu()
         self.discard_grads()
         weight_arr = np.zeros((len(list(self.enabled_connections()))), dtype=np.float32)
         id_arr = np.zeros((len(list(self.enabled_connections())), 2), dtype=np.int8)
@@ -981,18 +1121,8 @@ class CPPN():
 
         self.update_node_layers()
         
-    def to_cpu(self):
-        '''Move all tensors to CPU'''
-        self.device = torch.device('cpu')
-        for key, node in self.node_genome.items():
-            node.to_cpu()
-        for key, cx in self.connection_genome.items():
-            cx.to_cpu()
-        self.fitness = self.fitness.cpu()
-        if self.outputs is not None:
-            self.outputs = self.outputs.cpu()
-        self.adjusted_fitness = self.adjusted_fitness.cpu()
-        self.novelty = self.novelty.cpu()
+    
+
 
     def clone(self, deepcopy=True, cpu=False, new_id=False):
         """ Create a copy of this genome. """
@@ -1027,13 +1157,16 @@ class CPPN():
             out_child = child
         
         self.generator = torch.Generator(device=self.device)
-        self.generator.set_state(generator_state)
+        try:
+            self.generator.set_state(generator_state)
+        except RuntimeError:
+            ...
 
         out_child.set_id(id)
         out_child.age = 0
         
         if cpu:
-            out_child.to_cpu()
+            out_child.cpu()
 
         out_child.configure_generator()
 
@@ -1043,6 +1176,63 @@ class CPPN():
         for n in out_child.node_genome.values():
             n.bias = torch.tensor(n.bias.item(), dtype=self.config.dtype, device=out_child.device)
         return out_child
+    
+    
+
+    def layer_to_str(self, layer, i):
+        if isinstance(layer, Conv2d):
+            return f'CONV {i}\n{layer.kernel_size}x{layer.in_channels}'
+        elif isinstance(layer, torch.nn.MaxPool2d):
+            return f'POOL {i}\n{layer.kernel_size}x{layer.in_channels}'
+        elif isinstance(layer, torch.nn.MultiheadAttention):
+            return f'ATTN {i}\n{layer.num_heads} heads'
+        elif isinstance(layer, torch.nn.Sequential) and isinstance(layer[0], torch.nn.Upsample):
+            return f'UPSAMPLE {i}\nX{layer[0].scale_factor}'
+        elif isinstance(layer, torch.nn.Upsample):
+            return f'UPSAMPLE {i}\nX{layer.scale_factor}'
+        elif isinstance(layer, torch.nn.Flatten):
+            return f'FLATTEN {i}'
+        elif isinstance(layer, torch.nn.Unflatten):
+            return f'UNFLATTEN {i}'
+        elif isinstance(layer, torch.nn.Linear):
+            return f'LINEAR {i}'
+        elif isinstance(layer, Block):
+            return f'RESNET BLOCK {i}'
+
+    def to_nx(self):
+        import networkx as nx
+        G = nx.DiGraph()
+        for i, layer in enumerate(self.pre_layers):
+            G.add_node(self.layer_to_str(layer, i))
+         
+        for i, layer in enumerate(self.post_layers):
+            G.add_node(self.layer_to_str(layer, i))
+            
+        for i, layer in enumerate(self.pre_layers[:-1]):
+            G.add_edge(self.layer_to_str(layer, i), self.layer_to_str(self.pre_layers[i+1], i+1))
+            
+        for i, layer in enumerate(self.post_layers[:-1]):
+            G.add_edge(self.layer_to_str(layer, i), self.layer_to_str(self.post_layers[i+1], i+1))
+        
+        for n in self.node_genome.values():
+            G.add_node(n.key, type=n.type.name, fn=n.activation)
+        for c in self.connection_genome.values():
+            if c.enabled:
+                G.add_edge(c.key[0], c.key[1], weight=c.weight.item())
+                
+        if len(self.pre_layers) > 0:
+            last_layer = self.pre_layers[-1]
+            last_layer_i = len(self.pre_layers)-1
+            for n in self.input_nodes().values():
+                G.add_edge(self.layer_to_str(last_layer, last_layer_i), n.key)
+                
+        if len(self.post_layers) > 0:
+            first_layer = self.post_layers[0]
+            first_layer_i = 0
+            for n in self.output_nodes().values():
+                G.add_edge(n.key, self.layer_to_str(first_layer, first_layer_i))
+        return G
+    
     
     def to_networkx(self):
         self.update_node_layers()
@@ -1060,31 +1250,76 @@ class CPPN():
         
         return G
 
-    def draw_nx(self, size=(10,20)):
+    def draw_nx(self, size=(10,20), show=True):
         import matplotlib.pyplot as plt
         import networkx as nx
         from networkx.drawing.nx_agraph import graphviz_layout
         fig = plt.figure(figsize=size)
-        G = self.to_networkx()
+        G = self.to_nx()
         pos = graphviz_layout(G, prog='dot', args="-Grankdir=LR")
         nx.draw_networkx(
             G,
             with_labels=True,
             pos=pos,
-            labels={n:f"{n}\n{self.node_genome[n].activation.__name__[:4]}" for n in G.nodes(data=False) },
+            labels={n:f"{n}\n{self.node_genome[n].activation.__name__[:4]}\n{1}xHxW"if n in self.node_genome else n
+                    for n in G.nodes(data=False) },
             node_size=800,
             font_size=6,
             node_shape='s',
             node_color=['lightsteelblue' if n in self.node_genome else 'lightgreen' for n in G.nodes()  ]
             )
         plt.annotate('# params: ' + str(self.num_params), xy=(1.0, 1.0), xycoords='axes fraction', fontsize=12, ha='right', va='top')
-        plt.show()
+        if show:
+            plt.show()
 
 
     def to(self, device):
         self.device = device
+        for pre in self.pre_layers:
+            pre.to(device)
+        for post in self.post_layers:
+            post.to(device)
         for key, node in self.node_genome.items():
             node.to(device)
         for key, cx in self.connection_genome.items():
             cx.to(device)
-   
+                
+    def cpu(self):
+        '''Move all tensors to CPU'''
+        if self.device == torch.device('cpu'):
+            return
+        self.device = torch.device('cpu')
+        for key, node in self.node_genome.items():
+            node.to_cpu()
+        for key, cx in self.connection_genome.items():
+            cx.to_cpu()
+        self.fitness = self.fitness.cpu()
+        if self.outputs is not None:
+            self.outputs = self.outputs.cpu()
+        self.adjusted_fitness = self.adjusted_fitness.cpu()
+        self.novelty = self.novelty.cpu()
+
+        for layer in self.pre_layers:
+            layer.cpu()
+        for layer in self.post_layers:
+            layer.cpu()
+
+    def cuda(self, device='cuda:0'):
+        '''Move all tensors to CUDA'''
+        if self.device == torch.device(device):
+            return
+        self.device = torch.device(device)
+        for key, node in self.node_genome.items():
+            node.to_cuda(device)
+        for key, cx in self.connection_genome.items():
+            cx.to_cuda(device)
+        self.fitness = self.fitness.cuda(device)
+        if self.outputs is not None:
+            self.outputs = self.outputs.cuda(device)
+        self.adjusted_fitness = self.adjusted_fitness.cuda(device)
+        self.novelty = self.novelty.cuda(device)
+        
+        for layer in self.pre_layers:
+            layer.cuda(device)
+        for layer in self.post_layers:
+            layer.cuda(device)
