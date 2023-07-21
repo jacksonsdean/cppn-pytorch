@@ -6,8 +6,6 @@ import math
 import json
 import os
 import random
-from typing import Callable, List
-from typing import Union
 from cppn_torch.graph_util import activate_layer
 import torch
 from torch.nn import ConvTranspose2d, Conv2d
@@ -19,68 +17,14 @@ from cppn_torch.activation_functions import identity
 from cppn_torch.graph_util import *
 from cppn_torch.config import CPPNConfig as Config
 from cppn_torch.gene import * 
-from cppn_torch.util import upscale_conv2d
+from cppn_torch.util import upscale_conv2d, random_choice, random_normal, random_uniform
 
-def random_uniform(generator, low=0.0, high=1.0, grad=False):
-    return ((low - high) * torch.rand(1, device=generator.device, requires_grad=grad, generator=generator) + high)[0]
-def random_normal (generator, mean=0.0, std=1.0, grad=False):
-    return torch.randn(1, device=generator.device, requires_grad=grad, generator=generator)[0] * std + mean
-
-def random_choice(generator, choices, count, replace):
-    if not replace:
-        indxs = torch.randperm(len(choices))[:count]
-        output = []
-        for i in indxs:
-            output.append(choices[i])
-        return output
-    else:
-        return choices[torch.randint(len(choices), (count,), generator=generator)]
-
-
-class Block(nn.Module):
-    # TODO: batch norm bad idea for small batch sizes
-    def __init__(self, in_channels, out_channels, stride=1):
-        """
-        Args:
-          in_channels (int):  Number of input channels.
-          out_channels (int): Number of output channels.
-          stride (int):       Controls the stride.
-        """
-        super(Block, self).__init__()
-
-        self.skip = nn.Sequential()
-
-        if stride != 1 or in_channels != out_channels:
-          self.skip = nn.Sequential(
-            # nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride, bias=False),
-            upscale_conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=0, bias=False),
-            # nn.BatchNorm2d(out_channels),
-            )
-        else:
-          self.skip = None
-
-        self.block = nn.Sequential(
-            # nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1, stride=1, bias=False),
-            # nn.BatchNorm2d(out_channels),
-            # nn.ReLU(),
-            # nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1, stride=1, bias=False),
-            # nn.BatchNorm2d(out_channels),
-            upscale_conv2d(out_channels, out_channels, kernel_size=5, stride=1, padding=1, bias=False),
-            # nn.ReLU()
-            
-            )
-        
-
-    def forward(self, x):
-        out = self.block(x)
-        # out += (x if self.skip is None else self.skip(x))
-        # out = torch.nn.functional.relu(out)
-        return out
 
 class CPPN():
     """A CPPN Object with Nodes and Connections."""
 
-    constant_inputs = torch.zeros((0, 0, 0), dtype=torch.float32,requires_grad=False) # (res_h, res_w, n_inputs)
+    constant_inputs = None # (res_h, res_w, n_inputs)
+    # constant_inputs = torch.zeros((0, 0, 0), dtype=torch.float32,requires_grad=False) # (res_h, res_w, n_inputs)
     current_id = 1 # 0 reserved for 'random' parent
     node_indexer = None
     
@@ -125,11 +69,26 @@ class CPPN():
         
         return type.constant_inputs
 
+    @staticmethod
+    def initialize_inputs_from_config(config):
+        return CPPN.initialize_inputs( 
+                                        config.res_h, 
+                                        config.res_w,
+                                        config.use_radial_distance,
+                                        config.use_input_bias,
+                                        config.num_inputs,
+                                        config.device,
+                                        config.coord_range,
+                                        CPPN,
+                                        torch.float32
+                                        )
+
+
     def __init__(self, config = Config(), nodes = None, connections = None) -> None:
         """Initialize a CPPN."""
         self.config = config
-            
         assert self.config is not None
+        
         self.outputs = None
         self.node_genome = {}
         self.connection_genome = {}
@@ -146,6 +105,10 @@ class CPPN():
         self.adjusted_fitness = torch.tensor(-torch.inf, device=self.device)
         
         self.age = 0
+    
+    def __call__(self, *args, **kwargs):
+        # wrapper for forward
+        return self.forward(*args, **kwargs)
     
     def configure_generator(self):
         if self.config.seed is not None:
@@ -445,11 +408,7 @@ class CPPN():
         
         self.update_node_layers()
         assert self.config is not None, "Config is None."
-        type(self).initialize_inputs(self.config.res_h, self.config.res_w,
-                self.config.use_radial_distance,
-                self.config.use_input_bias,
-                self.config.num_inputs,
-                self.device)
+        type(self).initialize_inputs_from_config(self.config)
 
     @staticmethod
     def create_from_json(json_dict, config=None, configClass=None):
@@ -772,6 +731,7 @@ class CPPN():
             # inputs are first N nodes
             node.sum_inputs = inp
             node.outputs = node.activation(inp)
+            assert torch.isfinite(node.outputs).all()
 
     def get_layer(self, layer_index):
         """Returns a list of nodes in the given layer."""
@@ -823,10 +783,7 @@ class CPPN():
 
     def forward_(self, inputs=None, extra_inputs=None, channel_first=True):
         # TODO: channel_first is ignored for now
-        
-        if self.device!=inputs.device:
-            self.to(inputs.device) # breaks computation graph
-        
+
         assert self.config is not None, "Config is None."
         
         batch_size = 1 if extra_inputs is None else extra_inputs.shape[0]
@@ -838,7 +795,14 @@ class CPPN():
         assert isinstance(res_w, int), "Res w must be an integer."
         
         if inputs is None:
+            if type(self).constant_inputs is None:
+                self.initialize_inputs_from_config(self.config)
             inputs = type(self).constant_inputs
+        
+        if self.device!=inputs.device:
+            logging.warning(f"Moving CPPN to inputs device: {inputs.device}")
+            self.to(inputs.device) # breaks computation graph
+            
         for p_layer in self.pre_layers:
             inputs = inputs.permute(2,0,1)
             inputs = p_layer(inputs)
@@ -873,7 +837,12 @@ class CPPN():
                         weights = torch.ones((1), dtype=self.config.dtype, device=self.device)
 
                 if self.config.activation_mode == 'node':
+                    weights[~torch.isfinite(weights)] = torch.nn.Parameter(torch.tensor(1.0, device=self.device, dtype=self.config.dtype))
                     node.activate(X, weights) # naive
+                    
+                    assert torch.isfinite(X).all()
+                    assert torch.isfinite(weights).all()
+                    assert torch.isfinite(node.outputs).all()
                 elif self.config.activation_mode == 'layer':
                     # group by function for efficiency
                     Xs.append(X)
@@ -902,7 +871,14 @@ class CPPN():
                 
         assert str(self.outputs.device )== str(self.device), f"Output is on {self.outputs.device}, should be {self.device}"
         assert self.outputs.dtype == torch.float32, f"Output is {self.outputs.dtype}, should be float32"
+        if batch_size == 1:
+            self.outputs  = self.outputs.squeeze(0) # remove batch dimension if batch size is 1
+            # reshape the outputs to image shape
+            if not len(self.config.color_mode)>2:
+                self.outputs  = torch.reshape(self.outputs, (res_h, res_w))
+        
         return self.outputs
+    
     
     def forward(self, inputs=None, extra_inputs=None, no_aot=True, channel_first=True):
         """Feeds forward the network. A wrapper for forward_() that allows for AOT compilation."""

@@ -432,3 +432,18 @@ def center_crop(img, r, c):
     r1 = int(round((h - r) / 2.))
     c1 = int(round((w - c) / 2.))
     return img[r1:r1 + r, c1:c1 + c]
+
+def random_uniform(generator, low=0.0, high=1.0, grad=False):
+    return ((low - high) * torch.rand(1, device=generator.device, requires_grad=grad, generator=generator) + high)[0]
+def random_normal (generator, mean=0.0, std=1.0, grad=False):
+    return torch.randn(1, device=generator.device, requires_grad=grad, generator=generator)[0] * std + mean
+
+def random_choice(generator, choices, count, replace):
+    if not replace:
+        indxs = torch.randperm(len(choices))[:count]
+        output = []
+        for i in indxs:
+            output.append(choices[i])
+        return output
+    else:
+        return choices[torch.randint(len(choices), (count,), generator=generator)]

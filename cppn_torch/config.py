@@ -42,11 +42,13 @@ class CPPNConfig:
         self.allow_recurrent = False
         self.init_connection_probability = 0.85
         self.dense_init_connections = False
-        self.activations = get_all()
+        self.activations = [sin, cos, gauss, linear, tanh]
         self.normalize_outputs = False # None, "picbreeder", "sigmoid", 'min_max', 'abs_tanh'
         self.node_agg = 'sum'
         
         self.genome_type = None # algorithm default
+        
+        self.single_structural_mutation = False
         
         # NEAT specific parameters
         self.use_speciation = True
@@ -157,6 +159,12 @@ class CPPNConfig:
         self.activations= [fn.__name__ if (not isinstance(fn, str) and not fn is None) else fn for fn in self.activations]
         if isinstance(self.fitness_function, Callable):
             self.fitness_function = self.fitness_function.__name__
+            
+        if hasattr(self, 'objective_functions'):
+            for i, fn in enumerate(self.objective_functions):
+                if isinstance(fn, Callable):
+                    self.objective_functions[i] = fn.__name__
+            
         if self.fitness_schedule is not None:
             for i, fn in enumerate(self.fitness_schedule):
                 if isinstance(fn, Callable):
@@ -193,7 +201,10 @@ class CPPNConfig:
         self.device = torch.device(self.device)
         self.activations = [name_to_fn(name) if isinstance(name, str) else name for name in self.activations ]
         if isinstance(self.target, str):
+            try:
                 self.target = torch.tensor(iio.imread(self.target), dtype=torch.float32, device=self.device)
+            except FileNotFoundError:
+                self.target = None
         try:
             self.fitness_function = name_to_fn(self.fitness_function)
         except ValueError:
