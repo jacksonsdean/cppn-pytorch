@@ -219,6 +219,9 @@ def activate_population(genomes, config, inputs = None,  name_to_fn = af.__dict_
         inputs = type(genomes[0]).constant_inputs
     batch_size = 1 # TODO
         
+    if isinstance(genomes[0], tuple):
+        genomes = [g for _,_,g in genomes]
+    
     result = []
     nodes_by_id = {}
     genomes_by_id = {}
@@ -298,11 +301,20 @@ def activate_population(genomes, config, inputs = None,  name_to_fn = af.__dict_
                 nodes_by_id.get(id).outputs = output
     
     for g in genomes:
+        # collect outputs from the last layer
         sorted_o = sorted(g.output_nodes().values(), key=lambda x: x.key, reverse=True)
-        g.outputs = torch.stack([node.outputs for node in sorted_o])
+        g.outputs = torch.stack([node.outputs for node in sorted_o], dim=1)
+        
+        if batch_size == 1:
+            g.outputs  = g.outputs.squeeze(0) # remove batch dimension if batch size is 1
+            # reshape the outputs to image shape
+            if not len(g.config.color_mode)>2:
+                g.outputs  = torch.reshape(g.outputs, (g.config.res_h, g.config.res_w))
+                
         if hasattr(g, 'get_image'):
             if len(g.config.color_mode)>2:
-                g.outputs  =  g.outputs.permute(1, 2, 3, 0) # move color axis to end
+                # g.outputs  =  g.outputs.permute(1, 2, 3, 0) # move color axis to end
+                ...
             else:
                 g.outputs  = torch.reshape(g.outputs , (1, g.config.res_h, g.config.res_w))
 
@@ -313,8 +325,8 @@ def activate_population(genomes, config, inputs = None,  name_to_fn = af.__dict_
             
             if g.config.normalize_outputs:
                 g.normalize_image()
-            else:
-                g.clamp_image()
+
+            g.clamp_image()
             
             result.append(g.outputs)
         

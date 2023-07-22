@@ -83,7 +83,11 @@ class CPPN():
                                         torch.float32
                                         )
 
-
+    @staticmethod
+    def get_id():
+        __class__.current_id += 1
+        return __class__.current_id - 1
+    
     def __init__(self, config = Config(), nodes = None, connections = None) -> None:
         """Initialize a CPPN."""
         self.config = config
@@ -109,6 +113,22 @@ class CPPN():
     def __call__(self, *args, **kwargs):
         # wrapper for forward
         return self.forward(*args, **kwargs)
+    
+         
+    @property
+    def params(self):
+        return self.get_params()
+    
+    @property
+    def num_params(self):
+        cppn_len = len(self.get_cppn_params())
+        for layer in self.pre_layers:
+            for p in layer.parameters():
+                cppn_len += p.numel()
+        for layer in self.post_layers:
+            for p in layer.parameters():
+                cppn_len += p.numel()
+        return cppn_len
     
     def configure_generator(self):
         if self.config.seed is not None:
@@ -162,7 +182,6 @@ class CPPN():
         S = 1
         P = 1
         
-        
         self.post_layers = []
         num_channels = len(self.config.color_mode)
         flat_size = self.config.res_h*self.config.res_w*num_channels
@@ -176,11 +195,7 @@ class CPPN():
             self.post_layers[-1] = self.post_layers[-1].to(self.device)
         
         self.config._not_dirty()
-    
-    @staticmethod
-    def get_id():
-        __class__.current_id += 1
-        return __class__.current_id - 1
+
 
     def get_new_node_id(self):
         """Returns a new node id`."""
@@ -226,11 +241,7 @@ class CPPN():
                             NodeType.HIDDEN, 1, self.config.node_agg, self.device, grad=self.config.with_grad)
             self.node_genome[new_node.key] = new_node
      
-     
-    @property
-    def params(self):
-        return self.get_params()
-    
+
     def get_cppn_params(self):
         params = []
         required_nodes = required_for_output(*get_ids_from_individual(self))
@@ -272,17 +283,6 @@ class CPPN():
             params.extend(list(layer.parameters()))
         return params
     
-    @property
-    def num_params(self):
-        cppn_len = len(self.get_cppn_params())
-        for layer in self.pre_layers:
-            for p in layer.parameters():
-                cppn_len += p.numel()
-        for layer in self.post_layers:
-            for p in layer.parameters():
-                cppn_len += p.numel()
-        return cppn_len
-
     def get_named_params(self):
         """Returns a dict of all parameters in the network."""
         params = {}
@@ -530,15 +530,33 @@ class CPPN():
         else:
             mutate_activations, mutate_weights, mutate_bias, add_connection, add_node, remove_node, disable_connection, weight_mutation_max, prob_reenable_connection = rates
         
-        
-        if random_uniform(self.generator,0.0,1.0) < add_node:
-            self.add_node()
-        if random_uniform(self.generator,0.0,1.0) < remove_node:
-            self.remove_node()
-        if random_uniform(self.generator,0.0,1.0) < add_connection:
-            self.add_connection()
-        if random_uniform(self.generator,0.0,1.0) < disable_connection:
-            self.disable_connection()
+        rng = lambda: random_uniform(self.generator,0.0,1.0)
+        if self.config.single_structural_mutation:
+            div = max(1.0, (add_node + remove_node +
+                            add_connection + disable_connection))
+            
+            
+            r = rng()
+            if r < (add_node / div):
+                self.add_node()
+            elif r < ((add_node + remove_node) / div):
+                self.remove_node()
+            elif r < ((add_node + remove_node +
+                        add_connection) / div):
+                self.add_connection()
+            elif r < ((add_node + remove_node +
+                        add_connection + disable_connection) / div):
+                self.disable_connection()
+        else:
+            # mutate each structural category separately
+            if rng() < add_node:
+                self.add_node()
+            if rng() < remove_node:
+                self.remove_node()
+            if rng() < add_connection:
+                self.add_connection()
+            if rng() < disable_connection:
+                self.disable_connection()
         
         self.mutate_activations(mutate_activations)
         self.mutate_weights(mutate_weights)
@@ -762,7 +780,17 @@ class CPPN():
                 cx.weight = torch.tensor(cx.weight, device=self.device, requires_grad=cx.weight.requires_grad)
             cx.weight = torch.clamp(cx.weight, min=-self.config.max_weight, max=self.config.max_weight)
             
-
+    def clear_data(self):
+        """Clears the data from the network."""
+        self.outputs = None
+        for node in self.node_genome.values():
+            node.sum_inputs = None
+            node.outputs = None
+        
+        if self.config.with_grad:
+            for connection in self.connection_genome.values():
+                connection.weight.grad = None
+    
     def reset_activations(self, parallel=True):
         """Resets all node activations to zero."""
         assert self.config is not None, "Config is None."
@@ -781,10 +809,13 @@ class CPPN():
         """Evaluates the CPPN."""
         raise NotImplementedError("Use forward() instead.")
 
-    def forward_(self, inputs=None, extra_inputs=None, channel_first=True):
+    def forward_(self, inputs=None, extra_inputs=None, channel_first=True, override_activation_mode=None):
         # TODO: channel_first is ignored for now
 
         assert self.config is not None, "Config is None."
+        act_mode = self.config.activation_mode
+        if override_activation_mode is not None:
+            act_mode = override_activation_mode
         
         batch_size = 1 if extra_inputs is None else extra_inputs.shape[0]
         res_h, res_w = self.config.res_h, self.config.res_w
@@ -836,22 +867,25 @@ class CPPN():
                     if weights is None:
                         weights = torch.ones((1), dtype=self.config.dtype, device=self.device)
 
-                if self.config.activation_mode == 'node':
+                if act_mode == 'node':
                     weights[~torch.isfinite(weights)] = torch.nn.Parameter(torch.tensor(1.0, device=self.device, dtype=self.config.dtype))
                     node.activate(X, weights) # naive
                     
                     assert torch.isfinite(X).all()
                     assert torch.isfinite(weights).all()
                     assert torch.isfinite(node.outputs).all()
-                elif self.config.activation_mode == 'layer':
+                elif act_mode == 'layer':
                     # group by function for efficiency
                     Xs.append(X)
                     Ws.append(weights)
                     nodes.append(node)
+                elif act_mode == 'population':
+                    # group by function for efficiency
+                    raise RuntimeError("forward() called for population activation mode.")
                 else:
-                    raise ValueError(f"Unknown activation mode {self.config.activation_mode}")
+                    raise ValueError(f"Unknown activation mode {act_mode}")
                 
-            if self.config.activation_mode == 'layer':
+            if act_mode == 'layer':
                 activate_layer(Xs, Ws, {n.id:n for n in nodes}, self.config.node_agg)
             
         # collect outputs from the last layer
@@ -880,14 +914,14 @@ class CPPN():
         return self.outputs
     
     
-    def forward(self, inputs=None, extra_inputs=None, no_aot=True, channel_first=True):
+    def forward(self, inputs=None, extra_inputs=None, no_aot=True, channel_first=True, override_activation_mode=None):
         """Feeds forward the network. A wrapper for forward_() that allows for AOT compilation."""
         
         assert self.config is not None, "Config is None."
         if self.config.with_grad and not no_aot:
             if not hasattr(self, 'aot_fn'):
                 def f(x0, x1):
-                    return self.forward_(inputs=x0, extra_inputs=x1, channel_first=channel_first) 
+                    return self.forward_(inputs=x0, extra_inputs=x1, channel_first=channel_first, override_activation_mode=override_activation_mode) 
                 def fw(f, inps):
                     return f
                 def bw(f, inps):
@@ -897,7 +931,7 @@ class CPPN():
             
             return self.aot_fn(inputs, extra_inputs)  
         else:  
-            return self.forward_(inputs=inputs, extra_inputs=extra_inputs, channel_first=channel_first)
+            return self.forward_(inputs=inputs, extra_inputs=extra_inputs, channel_first=channel_first, override_activation_mode=override_activation_mode)
 
     def backward(self, loss:torch.Tensor,retain_graph=False):
         """Backpropagates the error through the network."""

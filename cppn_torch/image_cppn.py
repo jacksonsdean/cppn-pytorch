@@ -25,7 +25,7 @@ class ImageCPPN(CPPN):
     def image(self):
         return self.outputs
    
-    def get_image(self, inputs=None, force_recalculate=False, override_h=None, override_w=None, extra_inputs=None, no_aot=True, channel_first=True):
+    def get_image(self, inputs=None, force_recalculate=False, override_h=None, override_w=None, extra_inputs=None, no_aot=True, channel_first=True, override_activation_mode=None):
         """Returns an image of the network.
             Extra inputs are (batch_size, num_extra_inputs)
         """
@@ -80,7 +80,7 @@ class ImageCPPN(CPPN):
             self.outputs = self.get_image_data_serial(extra_inputs=extra_inputs)
         else:
             # whole image at once (100sx faster)
-            self.outputs = self.forward(inputs=inputs, extra_inputs=extra_inputs, no_aot=no_aot, channel_first=channel_first)
+            self.outputs = self.forward(inputs=inputs, extra_inputs=extra_inputs, no_aot=no_aot, channel_first=channel_first, override_activation_mode=override_activation_mode)
        
         assert self.outputs.dtype == torch.float32, f"Image is {self.outputs.dtype}, should be float32"
         assert str(self.outputs.device) == str(self.device), f"Image is on {self.outputs.device}, should be {self.device}"
@@ -110,7 +110,7 @@ class ImageCPPN(CPPN):
         self.outputs = pixels_tensor
         return self.outputs
 
-    def forward_(self, inputs=None, extra_inputs=None, channel_first=True):
+    def forward_(self, inputs=None, extra_inputs=None, channel_first=True, override_activation_mode=None):
         """Evaluate the network to get output data in parallel
             Extra inputs are (batch_size, num_extra_inputs)
         """
@@ -145,7 +145,10 @@ class ImageCPPN(CPPN):
         
             
         # evaluate CPPN
-        self.outputs = super().forward_(inputs=inputs, extra_inputs=extra_inputs)
+        self.outputs = super().forward_(inputs=inputs,
+                                        extra_inputs=extra_inputs,
+                                        channel_first=channel_first,
+                                        override_activation_mode=override_activation_mode)
 
         if batch_size == 1:
             self.outputs  = self.outputs.squeeze(0) # remove batch dimension if batch size is 1
@@ -187,7 +190,6 @@ class ImageCPPN(CPPN):
         
         if self.config.normalize_outputs:
             self.outputs = handle_normalization(self.outputs, self.config.normalize_outputs, self.imagenet_norm)
-            
         if self.config.color_mode == 'HSL':
             # assume output is HSL and convert to RGB
             self.outputs = hsl2rgb_torch(self.outputs)
