@@ -14,8 +14,8 @@ from cppn_torch.graph_util import feed_forward_layers, find_node_with_id, get_in
 from cppn_torch.normalization import *
 
 class ImageCPPN(CPPN):
-    def __init__(self, config=Config(), nodes=None, connections=None) -> None:
-        super().__init__(config, nodes, connections)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         
         self.imagenet_norm = None
         if self.config.normalize_outputs and "imagenet" in self.config.normalize_outputs:

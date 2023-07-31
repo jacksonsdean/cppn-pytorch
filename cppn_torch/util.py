@@ -15,6 +15,8 @@ from cppn_torch.cppn import NodeType
 from cppn_torch.graph_util import feed_forward_layers, get_ids_from_individual, get_incoming_connections_weights, required_for_output
 from cppn_torch.normalization import handle_normalization
    
+from torchvision.transforms import GaussianBlur
+   
 def visualize_network(individual, sample_point=None, color_mode="L", visualize_disabled=False, layout='multi', sample=False, show_weights=False, use_inp_bias=False, use_radial_distance=True, save_name=None, extra_text=None, curved=False, return_fig=False):
     c = individual.config
     if(sample):
@@ -421,7 +423,9 @@ def visualize_node_outputs(net, inputs):
                 a.axis('off')
     plt.show()
         
-        
+
+def gaussian_blur(img, sigma, kernel_size=(5,5)):
+    return GaussianBlur(kernel_size=kernel_size, sigma=sigma)(img)
         
         
 def resize(img, size):

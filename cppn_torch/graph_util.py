@@ -146,6 +146,7 @@ def get_incoming_connections_weights(individual, node):
         print(individual.id, [individual.node_genome[c.key[0]].outputs for c in cxs])
         print(list(individual.enabled_connections()))
     weights = torch.stack([cx.weight for cx in cxs]).to(individual.device)
+    # print(list(c.key[0] for c in cxs))
     inputs = torch.stack([individual.node_genome[c.key[0]].outputs for c in cxs], dim=1).to(individual.device)
 
     # weights shape is (num_incoming)

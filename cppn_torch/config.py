@@ -46,6 +46,8 @@ class CPPNConfig:
         self.normalize_outputs = False # None, "picbreeder", "sigmoid", 'min_max', 'abs_tanh'
         self.node_agg = 'sum'
         
+        self.output_blur = 0.0 # don't blur
+        
         self.genome_type = None # algorithm default
         
         self.single_structural_mutation = False

@@ -14,10 +14,11 @@ import logging
 from torch import nn
 from functorch.compile import compiled_function, draw_graph, aot_function
 from cppn_torch.activation_functions import identity
+import cppn_torch.activation_functions as af
 from cppn_torch.graph_util import *
 from cppn_torch.config import CPPNConfig as Config
 from cppn_torch.gene import * 
-from cppn_torch.util import upscale_conv2d, random_choice, random_normal, random_uniform
+from cppn_torch.util import upscale_conv2d, random_choice, random_normal, random_uniform, gaussian_blur
 
 
 class CPPN():
@@ -88,20 +89,20 @@ class CPPN():
         __class__.current_id += 1
         return __class__.current_id - 1
     
-    def __init__(self, config = Config(), nodes = None, connections = None) -> None:
+    def __init__(self, config = Config(), nodes = None, connections = None, do_reconfig=True) -> None:
         """Initialize a CPPN."""
         self.config = config
         assert self.config is not None
-        
+        self.device = self.config.device
         self.outputs = None
         self.node_genome = {}
         self.connection_genome = {}
-        self.selected = False
         self.species_id = 0
         self.id = type(self).get_id()
         
         self.in_dim = copy.deepcopy(self.config.num_inputs)
-        self.reconfig(self.config, nodes, connections)
+        if do_reconfig:
+            self.reconfig(self.config, nodes, connections)
         
         self.parents = (0, 0)
         self.fitness = torch.tensor(-torch.inf, device=self.device)
@@ -109,6 +110,7 @@ class CPPN():
         self.adjusted_fitness = torch.tensor(-torch.inf, device=self.device)
         
         self.age = 0
+        self.lineage = []
     
     def __call__(self, *args, **kwargs):
         # wrapper for forward
@@ -147,9 +149,7 @@ class CPPN():
         self.device = self.config.device
             
         if self.device is None:
-            raise ValueError("device is None") # TODO
-            # no device specified, try to use GPU
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            raise ValueError("device is None") 
 
         self.configure_generator()
         
@@ -195,7 +195,7 @@ class CPPN():
             self.post_layers[-1] = self.post_layers[-1].to(self.device)
         
         self.config._not_dirty()
-
+        
 
     def get_new_node_id(self):
         """Returns a new node id`."""
@@ -219,8 +219,12 @@ class CPPN():
         assert self.config is not None
         n_in = self.n_in_nodes
         n_out = self.n_outputs  
-
-        total_node_count = n_in + n_out + self.config.hidden_nodes_at_start
+       
+        n_hidden = self.config.hidden_nodes_at_start
+        if isinstance(n_hidden, int):
+            n_hidden = [n_hidden]
+        output_layer_idx = 1+len(n_hidden)
+        total_node_count = n_in + n_out + sum(n_hidden)
         
         for idx in range(n_in):
             fn = identity if not self.config.allow_input_activation_mutation else choose_random_function(self.generator, self.config)
@@ -232,15 +236,46 @@ class CPPN():
                 output_fn = choose_random_function(self.generator, self.config)
             else:
                 output_fn = self.config.output_activation
-            new_node = Node(-(1+idx), output_fn, NodeType.OUTPUT, 2, self.config.node_agg, self.device, grad=self.config.with_grad)
+            new_node = Node(-(1+idx), output_fn, NodeType.OUTPUT, output_layer_idx, self.config.node_agg, self.device, grad=self.config.with_grad)
             self.node_genome[new_node.key] = new_node
         
         # the rest are hidden:
-        for _ in range(n_in + n_out, total_node_count):
-            new_node = Node(self.get_new_node_id(), choose_random_function(self.generator, self.config),
-                            NodeType.HIDDEN, 1, self.config.node_agg, self.device, grad=self.config.with_grad)
-            self.node_genome[new_node.key] = new_node
-     
+        # for idx in range(n_in + n_out, total_node_count):
+        for hidden_layer_idx, layer_size in enumerate(n_hidden):
+            for idx in range(layer_size):
+                new_node = Node(self.get_new_node_id(), choose_random_function(self.generator, self.config),
+                                NodeType.HIDDEN, 1+hidden_layer_idx, self.config.node_agg, self.device, grad=self.config.with_grad)
+                self.node_genome[new_node.key] = new_node
+
+    def initialize_connection_genome(self):
+        """Initializes the connection genome."""
+        assert self.config is not None, "Config is None."
+
+        n_hidden = self.config.hidden_nodes_at_start
+        if isinstance(n_hidden, int):
+            n_hidden = [n_hidden]
+        output_layer_idx = 1+len(n_hidden)
+        
+        # connect all layers to the next layer
+        for layer_idx in range(output_layer_idx):
+            for from_node in self.get_layer(layer_idx):
+                for to_node in self.get_layer(layer_idx+1):
+                    new_cx = Connection(
+                        (from_node.id, to_node.id), self.random_weight())
+                    self.connection_genome[new_cx.key] = new_cx
+                    if torch.rand(1)[0] > self.config.init_connection_probability:
+                        new_cx.enabled = False
+        
+        # also connect inputs to outputs directly:
+        if self.config.dense_init_connections and sum(n_hidden) > 0:
+            for from_node in self.get_layer(0):
+                for to_node in self.get_layer(output_layer_idx):
+                    new_cx = Connection(
+                        (from_node.id, to_node.id), self.random_weight())
+                    self.connection_genome[new_cx.key] = new_cx
+                    if torch.rand(1)[0] > self.config.init_connection_probability:
+                        new_cx.enabled = False
+        
 
     def get_cppn_params(self):
         params = []
@@ -309,31 +344,6 @@ class CPPN():
         else:
             return self.get_params()
     
-    def initialize_connection_genome(self):
-        """Initializes the connection genome."""
-        assert self.config is not None, "Config is None."
-
-        output_layer_idx = 2 # initialized to 2
-        for layer_index in range(0, output_layer_idx+1):
-            for layer_to_index in range(layer_index, output_layer_idx+1):
-                if layer_index != layer_to_index:
-                    for from_node in self.get_layer(layer_index):
-                        for to_node in self.get_layer(layer_to_index):
-                            new_cx = Connection(
-                                (from_node.id, to_node.id), self.random_weight())
-                            self.connection_genome[new_cx.key] = new_cx
-                            if torch.rand(1)[0] > self.config.init_connection_probability:
-                                new_cx.enabled = False
-        
-        # also connect inputs to outputs directly:
-        if self.config.dense_init_connections and self.config.hidden_nodes_at_start > 0:
-            for from_node in self.get_layer(0):
-                for to_node in self.get_layer(output_layer_idx):
-                    new_cx = Connection(
-                        (from_node.id, to_node.id), self.random_weight())
-                    self.connection_genome[new_cx.key] = new_cx
-                    if torch.rand(1)[0] > self.config.init_connection_probability:
-                        new_cx.enabled = False
         
     def serialize(self):
         # del type(self).constant_inputs
@@ -368,7 +378,7 @@ class CPPN():
         copy_of_nodes = copy.deepcopy(self.node_genome).items()
         copy_of_connections = copy.deepcopy(self.connection_genome).items()
         return {"id":self.id, "parents":self.parents, "fitness":self.fitness.item(), "novelty":self.novelty.item(), "node_genome": [n.to_json() for _,n in copy_of_nodes], "connection_genome":\
-            [c.to_json() for _,c in copy_of_connections], "image": img, "selected": self.selected, "config": copy.deepcopy(self.config).to_json()}
+            [c.to_json() for _,c in copy_of_connections], "image": img, "config": copy.deepcopy(self.config).to_json()}
 
     def from_json(self, json_dict):
         """Constructs a CPPN from a json dict or string."""
@@ -566,8 +576,6 @@ class CPPN():
         self.outputs = None # reset the image
         if hasattr(self, 'aot_fn'):
             del self.aot_fn # needs recompile
-            
-        
 
     def disable_invalid_connections(self):
         """Disables connections that are not compatible with the current configuration."""
@@ -868,6 +876,7 @@ class CPPN():
                         weights = torch.ones((1), dtype=self.config.dtype, device=self.device)
 
                 if act_mode == 'node':
+                    weights = weights.to(self.config.dtype)
                     weights[~torch.isfinite(weights)] = torch.nn.Parameter(torch.tensor(1.0, device=self.device, dtype=self.config.dtype))
                     node.activate(X, weights) # naive
                     
@@ -881,7 +890,7 @@ class CPPN():
                     nodes.append(node)
                 elif act_mode == 'population':
                     # group by function for efficiency
-                    raise RuntimeError("forward() called for population activation mode.")
+                    raise RuntimeError("individual forward() called for population activation mode.")
                 else:
                     raise ValueError(f"Unknown activation mode {act_mode}")
                 
@@ -902,6 +911,9 @@ class CPPN():
             if isinstance(layer, torch.nn.Linear):
                 self.outputs = self.outputs.reshape(self.outputs.shape[0], len(self.config.color_mode), self.config.res_h, self.config.res_w)
                 
+        if self.config.output_blur > 0:
+            self.outputs = gaussian_blur(self.outputs, self.config.output_blur)
+        
                 
         assert str(self.outputs.device )== str(self.device), f"Output is on {self.outputs.device}, should be {self.device}"
         assert self.outputs.dtype == torch.float32, f"Output is {self.outputs.dtype}, should be float32"
@@ -1084,31 +1096,56 @@ class CPPN():
         id_arr = np.zeros((len(list(self.enabled_connections())), 2), dtype=np.int8)
         act_arr = np.zeros((len(list(self.enabled_connections())), 2), dtype=np.int8)
         types_arr = np.zeros((len(list(self.enabled_connections())), 2), dtype=np.int8)
-        activation_idx = {str(act): i for i, act in enumerate(self.config.activations)}
+        lineage_arr = np.zeros(len(self.lineage), dtype=np.int16)
+        if isinstance(self.config.activations[0], str):
+            activation_idx = {act: i for i, act in enumerate(self.config.activations)}
+        else:
+            activation_idx = {act.__name__: i for i, act in enumerate(self.config.activations)}
+        
+        activation_idx['identity'] = -1 # hardcode identity (sometimes used for input nodes)
+            
         version = np.array(self.config.version, dtype=np.int8)
         
         for i, cx in enumerate(self.enabled_connections()):
             in_node, out_node = cx.key
             id_arr[i, 0] = in_node
             id_arr[i, 1] = out_node
-            act_arr[i, 0] = activation_idx[str(self.node_genome[in_node].activation)]
-            act_arr[i, 1] = activation_idx[str(self.node_genome[out_node].activation)]
+            act_arr[i, 0] = activation_idx[self.node_genome[in_node].activation.__name__]
+            act_arr[i, 1] = activation_idx[self.node_genome[out_node].activation.__name__]
             types_arr[i, 0] = int(self.node_genome[in_node].type)
             types_arr[i, 1] = int(self.node_genome[out_node].type)
             weight_arr[i] = cx.weight
-        with open(path, 'wb') as f:
-            np.savez_compressed(f, version=version, weight_arr=weight_arr, id_arr=id_arr, act_arr=act_arr, types_arr=types_arr)
         
-    def decompress(self, path):
+        lineage_arr[:] = self.lineage
+            
+        if path is not None:
+            with open(path, 'wb') as f:
+                np.savez_compressed(f, version=version, id=self.id, weight_arr=weight_arr, id_arr=id_arr, act_arr=act_arr, types_arr=types_arr, lineage=lineage_arr)
+        else:
+            return version, self.id, weight_arr, id_arr, act_arr, types_arr, lineage_arr
+        
+    def decompress(self, path, dat=None):
         """Load the genome from a compressed numpy file."""
-        assert os.path.exists(path), f"Path {path} does not exist"
-        loaded = np.load(path)
-        version = loaded['version']
-        weight_arr = loaded['weight_arr']
-        id_arr = loaded['id_arr']
-        act_arr = loaded['act_arr']
-        types_arr = loaded['types_arr']
-        idx_activation = {i: act for i, act in enumerate(self.config.activations)}
+        if path is None:
+           version, id, weight_arr, id_arr, act_arr, types_arr, lineage_arr = dat
+        else:
+            assert os.path.exists(path), f"Path {path} does not exist"
+            loaded = np.load(path)
+            version = loaded['version']
+            weight_arr = loaded['weight_arr']
+            id_arr = loaded['id_arr']
+            act_arr = loaded['act_arr']
+            types_arr = loaded['types_arr']
+            lineage_arr = loaded['lineage']
+        
+        self.id = id
+        self.lineage = lineage_arr.tolist()
+        
+        if isinstance(self.config.activations[0], str):
+            idx_activation = {i: af.__dict__[act] for i, act in enumerate(self.config.activations)}
+        else:
+            idx_activation = {i:act for i, act in enumerate(self.config.activations)}
+        idx_activation[-1] = 'identity' # hardcode identity (sometimes used for input nodes)
         
         if version.tolist() != self.config.version:
             logging.warn(f"Version mismatch. Expected {self.config.version}, got {version.tolist()}")
@@ -1120,19 +1157,33 @@ class CPPN():
         self.connection_genome = {}
         cx_id = 0
         for ids, acts, weight in zip(id_arr, act_arr, weight_arr):
-            in_node, out_node = ids
+            in_node_id, out_node_id = ids
             act_in, act_out = acts
-            if in_node not in self.node_genome:
-                in_node = Node(in_node, idx_activation[act_in], types_arr[cx_id][0], device=self.device, grad=self.config.with_grad)
-            if out_node not in self.node_genome:
-                self.node_genome[out_node] = Node(out_node, idx_activation[act_out], types_arr[cx_id][1], self.config.node_agg, device=self.device, grad=self.config.with_grad)
-            self.connection_genome[(in_node, out_node)] = Connection((in_node, out_node), torch.tensor(weight, dtype=self.config.dtype, device=self.device, requires_grad=self.config.with_grad))
+            if in_node_id not in self.node_genome:
+                # node: key, activation=None, _type=2, _layer=999, node_agg="sum", device="cpu", grad=True
+                 self.node_genome[in_node_id] = Node(
+                     key=in_node_id, 
+                     activation=idx_activation[act_in], 
+                     _type=types_arr[cx_id][0], 
+                     node_agg=self.config.node_agg, 
+                     device=self.device, 
+                     grad=self.config.with_grad
+                     )
+            if out_node_id not in self.node_genome:
+                self.node_genome[out_node_id] = Node(
+                    key=out_node_id, 
+                    activation=idx_activation[act_out], 
+                    _type=types_arr[cx_id][1], 
+                    node_agg=self.config.node_agg, 
+                    device=self.device, 
+                    grad=self.config.with_grad
+                    )
+            self.connection_genome[(in_node_id, out_node_id)] = Connection((in_node_id, out_node_id), torch.tensor(weight, dtype=self.config.dtype, device=self.device, requires_grad=self.config.with_grad))
             cx_id += 1
-
-        self.update_node_layers()
+            
+        self.reconfig(self.config)
         
-    
-
+        self.update_node_layers()
 
     def clone(self, deepcopy=True, cpu=False, new_id=False):
         """ Create a copy of this genome. """
@@ -1209,7 +1260,7 @@ class CPPN():
         elif isinstance(layer, Block):
             return f'RESNET BLOCK {i}'
 
-    def to_nx(self):
+    def to_nx(self, only_enabled=True):
         import networkx as nx
         G = nx.DiGraph()
         for i, layer in enumerate(self.pre_layers):
@@ -1224,11 +1275,23 @@ class CPPN():
         for i, layer in enumerate(self.post_layers[:-1]):
             G.add_edge(self.layer_to_str(layer, i), self.layer_to_str(self.post_layers[i+1], i+1))
         
-        for n in self.node_genome.values():
-            G.add_node(n.key, type=n.type.name, fn=n.activation)
-        for c in self.connection_genome.values():
-            if c.enabled:
-                G.add_edge(c.key[0], c.key[1], weight=c.weight.item())
+        if only_enabled:
+            used_nodes = set()
+            for key, cx in self.connection_genome.items():
+                if cx.enabled:
+                    G.add_edge(key[0], key[1], weight=cx.weight.item())
+                    used_nodes.add(key[0])
+                    used_nodes.add(key[1])
+                    
+            for key, node in self.node_genome.items():
+                if key in used_nodes:
+                    G.add_node(key, activation=node.activation.__name__)
+        else:
+            for n in self.node_genome.values():
+                G.add_node(n.key, type=n.type.name, fn=n.activation)
+            for c in self.connection_genome.values():
+                if c.enabled:
+                    G.add_edge(c.key[0], c.key[1], weight=c.weight.item())
                 
         if len(self.pre_layers) > 0:
             last_layer = self.pre_layers[-1]
