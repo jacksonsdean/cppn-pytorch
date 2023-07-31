@@ -8,8 +8,9 @@ from skimage.color import hsv2rgb as sk_hsv2rgb
 import numpy as np
 import cppn_torch.activation_functions as af
 import cppn_torch.fitness_functions as ff
+import logging
 
-def is_valid_connection(nodes, key:tuple, config):
+def is_valid_connection(nodes, key:tuple, config, warn:bool=False):
     """
     Checks if a connection is valid.
     params:
@@ -23,9 +24,13 @@ def is_valid_connection(nodes, key:tuple, config):
     from_node, to_node = nodes[from_node], nodes[to_node]
     
     if from_node.layer == to_node.layer:
+        if warn:
+            logging.warning(f"Connection from node {from_node.id} (layer:{from_node.layer}) to node {to_node.id} (layer:{to_node.layer}) is invalid because they are on the same layer.")
         return False  # don't allow two nodes on the same layer to connect
 
     if not config.allow_recurrent and from_node.layer > to_node.layer:
+        if warn:
+            logging.warning(f"Connection from node {from_node.id} (layer:{from_node.layer}) to node {to_node.id} (layer:{to_node.layer}) is invalid because it is recurrent.")
         return False  # invalid
 
     return True
@@ -437,8 +442,9 @@ def feed_forward_layers(individual):
         # Keep only the used nodes whose entire input set is contained in s.
         t = set()
         for n in c:
-            if n in required and any(a in s for (a, b) in connections if b == n):
+            if n in required and all(a in s for (a, b) in connections if b == n):
                 t.add(n)
+        # t = set(a for (a, b) in connections if b in s and a not in s)
         if not t:
             break
 

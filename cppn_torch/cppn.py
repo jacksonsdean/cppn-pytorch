@@ -178,6 +178,8 @@ class CPPN():
         else:
             self.connection_genome = connections
         
+        self.disable_invalid_connections()
+        
         F = 3
         S = 1
         P = 1
@@ -223,14 +225,17 @@ class CPPN():
         n_hidden = self.config.hidden_nodes_at_start
         if isinstance(n_hidden, int):
             n_hidden = [n_hidden]
-        output_layer_idx = 1+len(n_hidden)
+        
+        output_layer_idx = 1+len(n_hidden) if sum(n_hidden) > 0 else 1
         total_node_count = n_in + n_out + sum(n_hidden)
         
+        # Input nodes:
         for idx in range(n_in):
             fn = identity if not self.config.allow_input_activation_mutation else choose_random_function(self.generator, self.config)
             new_node = Node(-(1+idx), fn, NodeType.INPUT, 0, self.config.node_agg, self.device, grad=self.config.with_grad)
             self.node_genome[new_node.key] = new_node
             
+        # Output nodes:
         for idx in range(n_in, n_in + n_out):
             if self.config.output_activation is None:
                 output_fn = choose_random_function(self.generator, self.config)
@@ -255,7 +260,7 @@ class CPPN():
         if isinstance(n_hidden, int):
             n_hidden = [n_hidden]
         output_layer_idx = 1+len(n_hidden)
-        
+
         # connect all layers to the next layer
         for layer_idx in range(output_layer_idx):
             for from_node in self.get_layer(layer_idx):
@@ -579,15 +584,19 @@ class CPPN():
 
     def disable_invalid_connections(self):
         """Disables connections that are not compatible with the current configuration."""
-        return # TODO: test, but there should never be invalid connections
+        # return # TODO: test, but there should never be invalid connections
+        invalid = []
         for key, connection in self.connection_genome.items():
             if connection.enabled:
-                if not is_valid_connection(self.node_genome, connection.key, self.config):
-                    connection.enabled = False
+                if not is_valid_connection(self.node_genome, connection.key, self.config, warn=True):
+                    invalid.append(key)
+        for key in invalid:
+            del self.connection_genome[key]
 
     def add_connection(self):
         """Adds a connection to the CPPN."""
         assert self.config is not None, "Config is None."
+        self.update_node_layers()
         
         for _ in range(20):  # try 20 times max
             [from_node, to_node] = random_choice(self.generator, 
@@ -601,7 +610,8 @@ class CPPN():
                 if not existing_cx.enabled:
                     if random_uniform(self.generator) < self.config.prob_reenable_connection:
                         existing_cx.enabled = True # re-enable the connection
-                break  # don't allow duplicates, don't enable more than one connection
+                    break  # don't enable more than one connection
+                continue # don't add more than one connection
 
             # else if it doesn't exist, check if it is valid
             if is_valid_connection(self.node_genome, (from_node.id, to_node.id), self.config):
@@ -687,7 +697,7 @@ class CPPN():
     def prune(self):
         removed = 0
         for cx in list(self.connection_genome.values())[::-1]:
-            if abs(cx.weight )< self.config.prune_threshold:
+            if abs(cx.weight)< self.config.prune_threshold:
                 del self.connection_genome[cx.key]
                 removed += 1
         for _ in range(self.config.min_pruned - removed):
@@ -723,13 +733,18 @@ class CPPN():
     def update_node_layers(self):
         """Update the node layers."""
         layers = feed_forward_layers(self)
+        max_layer = 0
         for _, node in self.input_nodes().items():
             node.layer = 0
         for layer_index, layer in enumerate(layers):
             for node_id in layer:
                 node = find_node_with_id(self.node_genome, node_id)
                 node.layer = layer_index + 1
-
+            max_layer = max(max_layer, layer_index + 1)
+            
+        # for _, node in self.output_nodes().items():
+        #     node.layer = max_layer + 1
+            
     def input_nodes(self) -> dict:
         """Returns a dict of all input nodes."""
         return {n.id: n for n in self.node_genome.values() if n.type == NodeType.INPUT}
@@ -1263,6 +1278,7 @@ class CPPN():
     def to_nx(self, only_enabled=True):
         import networkx as nx
         G = nx.DiGraph()
+        self.update_node_layers()
         for i, layer in enumerate(self.pre_layers):
             G.add_node(self.layer_to_str(layer, i))
          
@@ -1329,12 +1345,18 @@ class CPPN():
         from networkx.drawing.nx_agraph import graphviz_layout
         fig = plt.figure(figsize=size)
         G = self.to_nx()
-        pos = graphviz_layout(G, prog='dot', args="-Grankdir=LR")
+        args = "-Grankdir=RL"
+
+        pos = graphviz_layout(G, prog='dot', args=args)
+        
+        
+        
         nx.draw_networkx(
             G,
             with_labels=True,
             pos=pos,
-            labels={n:f"{n}\n{self.node_genome[n].activation.__name__[:4]}\n{1}xHxW"if n in self.node_genome else n
+            labels={n:f"{self.node_genome[n].layer}.{n}\n{self.node_genome[n].activation.__name__[:4]}\n{1}xHxW"
+                    if n in self.node_genome else n
                     for n in G.nodes(data=False) },
             node_size=800,
             font_size=6,
@@ -1342,6 +1364,9 @@ class CPPN():
             node_color=['lightsteelblue' if n in self.node_genome else 'lightgreen' for n in G.nodes()  ]
             )
         plt.annotate('# params: ' + str(self.num_params), xy=(1.0, 1.0), xycoords='axes fraction', fontsize=12, ha='right', va='top')
+        
+        plt.tight_layout()
+        plt.axis('off')
         if show:
             plt.show()
 
