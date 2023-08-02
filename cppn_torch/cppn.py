@@ -100,7 +100,6 @@ class CPPN():
         self.species_id = 0
         self.id = type(self).get_id()
         
-        self.in_dim = copy.deepcopy(self.config.num_inputs)
         if do_reconfig:
             self.reconfig(self.config, nodes, connections)
         
@@ -197,6 +196,8 @@ class CPPN():
             self.post_layers[-1] = self.post_layers[-1].to(self.device)
         
         self.config._not_dirty()
+        
+        self.sgd_lr = self.config.sgd_learning_rate
         
 
     def get_new_node_id(self):
@@ -331,11 +332,11 @@ class CPPN():
                 params[f"w_{cx.key}"] = cx.weight
         return params
 
-    def prepare_optimizer(self, opt_class=torch.optim.Adam, lr=None, create_opt = False):
+    def prepare_optimizer(self, opt_class=torch.optim.Adam, lr=None, create_opt=False):
         """Prepares the optimizer."""
         assert self.config is not None, "Config is None."
         if lr is None:
-            lr = self.config.sgd_learning_rate
+            lr = self.sgd_lr
         self.outputs = None # reset output
         
         # make a new computation graph
@@ -522,6 +523,16 @@ class CPPN():
         self.clamp_weights()
         self.outputs = None # reset the image
         
+    def mutate_lr(self, sigma):
+        """Mutates the learning rate."""
+        if not sigma:
+            return # don't mutate
+        assert self.config is not None, "Config is None."
+        self.sgd_lr = self.sgd_lr + random_normal(self.generator, 0, sigma)
+        self.sgd_lr = max(1e-8, self.sgd_lr)
+        self.outputs = None
+        
+    
     def depth(self):
         """Returns the depth of the network."""
         return len(self.get_layers())
@@ -542,42 +553,47 @@ class CPPN():
             mutate_weights = self.config.prob_mutate_weight
             mutate_bias = self.config.prob_mutate_bias
             mutate_activations = self.config.prob_mutate_activation
+            mutate_sgd_lr_sigma = self.config.mutate_sgd_lr_sigma
         else:
             mutate_activations, mutate_weights, mutate_bias, add_connection, add_node, remove_node, disable_connection, weight_mutation_max, prob_reenable_connection = rates
         
         rng = lambda: random_uniform(self.generator,0.0,1.0)
-        if self.config.single_structural_mutation:
-            div = max(1.0, (add_node + remove_node +
-                            add_connection + disable_connection))
+        for _ in range(self.config.mutation_iters):
+            if self.config.single_structural_mutation:
+                div = max(1.0, (add_node + remove_node +
+                                add_connection + disable_connection))
+                
+                
+                r = rng()
+                if r < (add_node / div):
+                    self.add_node()
+                elif r < ((add_node + remove_node) / div):
+                    self.remove_node()
+                elif r < ((add_node + remove_node +
+                            add_connection) / div):
+                    self.add_connection()
+                elif r < ((add_node + remove_node +
+                            add_connection + disable_connection) / div):
+                    self.disable_connection()
+            else:
+                # mutate each structural category separately
+                if rng() < add_node:
+                    self.add_node()
+                if rng() < remove_node:
+                    self.remove_node()
+                if rng() < add_connection:
+                    self.add_connection()
+                if rng() < disable_connection:
+                    self.disable_connection()
+            
+            self.mutate_activations(mutate_activations)
+            self.mutate_weights(mutate_weights)
+            self.mutate_bias(mutate_bias)
+            self.mutate_lr(mutate_sgd_lr_sigma)
+            self.update_node_layers()
+            self.disable_invalid_connections()
             
             
-            r = rng()
-            if r < (add_node / div):
-                self.add_node()
-            elif r < ((add_node + remove_node) / div):
-                self.remove_node()
-            elif r < ((add_node + remove_node +
-                        add_connection) / div):
-                self.add_connection()
-            elif r < ((add_node + remove_node +
-                        add_connection + disable_connection) / div):
-                self.disable_connection()
-        else:
-            # mutate each structural category separately
-            if rng() < add_node:
-                self.add_node()
-            if rng() < remove_node:
-                self.remove_node()
-            if rng() < add_connection:
-                self.add_connection()
-            if rng() < disable_connection:
-                self.disable_connection()
-        
-        self.mutate_activations(mutate_activations)
-        self.mutate_weights(mutate_weights)
-        self.mutate_bias(mutate_bias)
-        self.update_node_layers()
-        # self.disable_invalid_connections()
         self.outputs = None # reset the image
         if hasattr(self, 'aot_fn'):
             del self.aot_fn # needs recompile
@@ -588,7 +604,7 @@ class CPPN():
         invalid = []
         for key, connection in self.connection_genome.items():
             if connection.enabled:
-                if not is_valid_connection(self.node_genome, connection.key, self.config, warn=True):
+                if not is_valid_connection(self.node_genome, self.connection_genome, connection.key, self.config, warn=True):
                     invalid.append(key)
         for key in invalid:
             del self.connection_genome[key]
@@ -614,7 +630,7 @@ class CPPN():
                 continue # don't add more than one connection
 
             # else if it doesn't exist, check if it is valid
-            if is_valid_connection(self.node_genome, (from_node.id, to_node.id), self.config):
+            if is_valid_connection(self.node_genome,  self.connection_genome, (from_node.id, to_node.id), self.config):
                 # valid connection, add
                 new_cx = Connection((from_node.id, to_node.id), self.random_weight())
                 assert new_cx.key not in self.connection_genome.keys(),\
@@ -892,11 +908,14 @@ class CPPN():
 
                 if act_mode == 'node':
                     weights = weights.to(self.config.dtype)
-                    weights[~torch.isfinite(weights)] = torch.nn.Parameter(torch.tensor(1.0, device=self.device, dtype=self.config.dtype))
+                    assert torch.isfinite(X).all()
+                    if not torch.isfinite(weights).all():
+                        # self.draw_nx(show=True)
+                        logging.warning(f"found {torch.tensor(torch.isfinite(weights)==0.0).sum()} non-finite values in node {node.id} weights (out of {weights.numel()}), {weights}")
+                    assert torch.isfinite(weights).all(), f"found {torch.tensor(torch.isfinite(weights)==0.0).sum()} non-finite values in node {node.id} weights (out of {weights.numel()}), {weights}"
+                    weights[~torch.isfinite(weights)] = torch.nn.Parameter(torch.tensor(0.0, device=self.device, dtype=self.config.dtype))
                     node.activate(X, weights) # naive
                     
-                    assert torch.isfinite(X).all()
-                    assert torch.isfinite(weights).all()
                     assert torch.isfinite(node.outputs).all()
                 elif act_mode == 'layer':
                     # group by function for efficiency
@@ -1345,7 +1364,7 @@ class CPPN():
         from networkx.drawing.nx_agraph import graphviz_layout
         fig = plt.figure(figsize=size)
         G = self.to_nx()
-        args = "-Grankdir=RL"
+        args = "-Grankdir=LR"
 
         pos = graphviz_layout(G, prog='dot', args=args)
         
@@ -1355,7 +1374,7 @@ class CPPN():
             G,
             with_labels=True,
             pos=pos,
-            labels={n:f"{self.node_genome[n].layer}.{n}\n{self.node_genome[n].activation.__name__[:4]}\n{1}xHxW"
+            labels={n:f"{self.node_genome[n].layer}.{n}\n{self.node_genome[n].activation.__name__[:4]}\n"#{1}xHxW"
                     if n in self.node_genome else n
                     for n in G.nodes(data=False) },
             node_size=800,

@@ -10,7 +10,7 @@ import cppn_torch.activation_functions as af
 import cppn_torch.fitness_functions as ff
 import logging
 
-def is_valid_connection(nodes, key:tuple, config, warn:bool=False):
+def is_valid_connection(nodes, connections, key:tuple, config, warn:bool=False):
     """
     Checks if a connection is valid.
     params:
@@ -23,15 +23,21 @@ def is_valid_connection(nodes, key:tuple, config, warn:bool=False):
     from_node, to_node = key
     from_node, to_node = nodes[from_node], nodes[to_node]
     
-    if from_node.layer == to_node.layer:
-        if warn:
-            logging.warning(f"Connection from node {from_node.id} (layer:{from_node.layer}) to node {to_node.id} (layer:{to_node.layer}) is invalid because they are on the same layer.")
-        return False  # don't allow two nodes on the same layer to connect
+    connections = list(connections.keys())
+    
+    # if from_node.layer == to_node.layer:
+    #     if warn:
+    #         logging.warning(f"Connection from node {from_node.id} (layer:{from_node.layer}) to node {to_node.id} (layer:{to_node.layer}) is invalid because they are on the same layer.")
+    #     return False  # don't allow two nodes on the same layer to connect
 
-    if not config.allow_recurrent and from_node.layer > to_node.layer:
+    if not config.allow_recurrent and creates_cycle(connections, key):
         if warn:
-            logging.warning(f"Connection from node {from_node.id} (layer:{from_node.layer}) to node {to_node.id} (layer:{to_node.layer}) is invalid because it is recurrent.")
-        return False  # invalid
+            logging.warning(f"Connection from node {from_node.id} (layer:{from_node.layer}) to node {to_node.id} (layer:{to_node.layer}) is invalid because it creates a cycle.")
+        return False
+    # if not config.allow_recurrent and from_node.layer > to_node.layer:
+    #     if warn:
+    #         logging.warning(f"Connection from node {from_node.id} (layer:{from_node.layer}) to node {to_node.id} (layer:{to_node.layer}) is invalid because it is recurrent.")
+    #     return False  # invalid
 
     return True
 
@@ -383,6 +389,31 @@ def activate_population(genomes, config, inputs = None,  name_to_fn = af.__dict_
 # OF THE USE OF THIS
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ###############################################################################################
+
+
+def creates_cycle(connections, test):
+    """
+    Returns true if the addition of the 'test' connection would create a cycle,
+    assuming that no cycle already exists in the graph represented by 'connections'.
+    """
+    i, o = test
+    if i == o:
+        return True
+
+    visited = {o}
+    while True:
+        num_added = 0
+        for a, b in connections:
+            if a in visited and b not in visited:
+                if b == i:
+                    return True
+
+                visited.add(b)
+                num_added += 1
+
+        if num_added == 0:
+            return False
+
 
 
 def required_for_output(inputs, outputs, connections):

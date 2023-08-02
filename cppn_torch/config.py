@@ -67,27 +67,32 @@ class CPPNConfig:
         NEAT: probability of adding a node is 0.03 and the
           probability of adding a connection is 0.05."""
         self.prob_mutate_activation = .15
-        self.prob_mutate_weight = .80 # .80 in the original NEAT
         self.prob_add_connection = .15 # 0.05 in the original NEAT
         self.prob_add_node = .15 # 0.03 in original NEAT
         self.prob_remove_node = 0.05
         self.prob_disable_connection = .05
         
+        # use 0 with SGD:
+        self.prob_mutate_weight = 0.0 # .80 in the original NEAT
+        self.prob_weight_reinit = 0.0 # .1 in the original NEAT (.1 of .8)
+        self.prob_mutate_bias = 0.0
+        
+        
         self.initial_mutations = 0 
 
         self.bias_mutation_std = .30
-        self.prob_mutate_bias = .80
 
         self.max_weight = 3.0
         self.weight_mutation_std = 2.0
         self.weight_init_std = 1.0
         self.weight_threshold = 0
         self.prob_random_restart =.001
-        self.prob_weight_reinit = 0.1 * .80 # .1 in the original NEAT (.1 of .8)
         self.prob_reenable_connection = 0.1
         self.coord_range = (-0.5, 0.5)
         self.output_activation = softplus
         self.target_resize = None # use original size
+        
+        self.mutation_iters = 1 # number of times to mutate the genome
         
         self.output_dir = None
         self.experiment_condition = "_default"
@@ -100,6 +105,24 @@ class CPPNConfig:
         self.allow_input_activation_mutation = True
 
         self.animate = False
+        
+        self.with_grad = True
+        self.sgd_learning_rate = 0.03
+        self.prob_sgd_weight = 1.0 # update all weights
+        self.sgd_early_stop_delta = -0.0005
+        self.sgd_l2_reg = 0.0 # don't use L2 regularization
+        self.sgd_steps = 20
+        self.sgd_clamp_grad = False
+        self.grad_every = 1
+        self.sgd_early_stop = 5
+        self.mutate_sgd_lr_sigma = False # don't mutate learning rate (per genome)
+        
+        # Fourier features:
+        self.use_fourier_features = True
+        self.n_fourier_features = 8
+        self.fourier_feature_scale = 2.0
+        self.fourier_mult_percent = 0.05
+        self.fourier_sin_and_cos = False
 
         # https://link.springer.com/content/pdf/10.1007/s10710-007-9028-8.pdf page 148
         self.use_input_bias = False # SNGA,
