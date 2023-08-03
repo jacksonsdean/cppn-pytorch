@@ -943,7 +943,7 @@ class CPPN():
                         # self.draw_nx(show=True)
                         logging.warning(f"found {torch.tensor(torch.isfinite(weights)==0.0).sum()} non-finite values in node {node.id} weights (out of {weights.numel()}), {weights}")
                     assert torch.isfinite(weights).all(), f"found {torch.tensor(torch.isfinite(weights)==0.0).sum()} non-finite values in node {node.id} weights (out of {weights.numel()}), {weights}"
-                    weights[~torch.isfinite(weights)] = torch.nn.Parameter(torch.tensor(0.0, device=self.device, dtype=self.config.dtype))
+                    weights[~torch.isfinite(weights)] = torch.nn.Parameter(torch.tensor(0.0, device=self.device, dtype=dtype))
                     node.activate(X, weights) # naive
                     
                     assert torch.isfinite(node.outputs).all()
