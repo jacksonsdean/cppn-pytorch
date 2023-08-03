@@ -7,6 +7,7 @@ from typing import Callable
 import imageio.v2 as iio
 import torch
 import typing
+import logging
 
 from cppn_torch.activation_functions import *
 from cppn_torch.graph_util import name_to_fn
@@ -16,7 +17,7 @@ class CPPNConfig:
     version = [0, 1, 0]
     
     # pylint: disable=too-many-instance-attributes
-    def __init__(self) -> None:
+    def __init__(self, file=None) -> None:
         # Initialize to default values
         # These are only used if a sub-class does not override them
         self.seed = None
@@ -113,7 +114,7 @@ class CPPNConfig:
         self.sgd_l2_reg = 0.0 # don't use L2 regularization
         self.sgd_steps = 20
         self.sgd_clamp_grad = False
-        self.grad_every = 1
+        self.sgd_every = 1
         self.sgd_early_stop = 5
         self.mutate_sgd_lr_sigma = False # don't mutate learning rate (per genome)
         
@@ -138,6 +139,18 @@ class CPPNConfig:
             self.num_inputs += 1
             
         self._make_dirty()
+        
+        self.file = file
+        
+        if self.file is not None:
+            import json
+            print(f"Loading config from {self.file}")
+            with open(self.file, "r") as f:
+                loaded = json.load(f)
+                if "controls" in loaded:
+                    controls = loaded["controls"]
+                self.from_json(controls, print_out=True)
+                f.close()
         
     def __setattr__(self, key, value):
         self.__dict__[key] = value
@@ -182,7 +195,7 @@ class CPPNConfig:
             self.genome_type = self.genome_type.__name__
         self.device = str(self.device)
         self.activations= [fn.__name__ if (not isinstance(fn, str) and not fn is None) else fn for fn in self.activations]
-        if isinstance(self.fitness_function, Callable):
+        if hasattr(self, "fitness_function") and isinstance(self.fitness_function, Callable):
             self.fitness_function = self.fitness_function.__name__
             
         if hasattr(self, 'objective_functions'):
@@ -190,7 +203,7 @@ class CPPNConfig:
                 if isinstance(fn, Callable):
                     self.objective_functions[i] = fn.__name__
             
-        if self.fitness_schedule is not None:
+        if hasattr(self, "fitness_schedule") and self.fitness_schedule is not None:
             for i, fn in enumerate(self.fitness_schedule):
                 if isinstance(fn, Callable):
                     self.fitness_schedule[i] = fn.__name__
@@ -225,18 +238,19 @@ class CPPNConfig:
                 
         self.device = torch.device(self.device)
         self.activations = [name_to_fn(name) if isinstance(name, str) else name for name in self.activations ]
-        if isinstance(self.target, str):
+        if hasattr(self, "target") and isinstance(self.target, str):
             try:
                 self.target = torch.tensor(iio.imread(self.target), dtype=torch.float32, device=self.device)
             except FileNotFoundError:
                 self.target = None
         try:
-            self.fitness_function = name_to_fn(self.fitness_function)
+            if hasattr(self, "fitness_function") and isinstance(self.fitness_function, str):
+                self.fitness_function = name_to_fn(self.fitness_function)
         except ValueError:
             self.fitness_function = None
         self.output_activation = name_to_fn(self.output_activation) if isinstance(self.output_activation, str) else self.output_activation
         
-        if self.fitness_schedule is not None:
+        if hasattr(self, "fitness_function") and self.fitness_schedule is not None:
             for i, fn in enumerate(self.fitness_schedule):
                 if isinstance(fn, str):
                     self.fitness_schedule[i] = name_to_fn(fn)
@@ -249,13 +263,17 @@ class CPPNConfig:
         return json_string
 
 
-    def from_json(self, json_dict):
+    def from_json(self, json_dict, print_out=False):
         """Converts the configuration from a json string."""
         if isinstance(json_dict, dict):
             json_dict = json.dumps(json_dict)
             json_dict = json.loads(json_dict)
-        self.fns_to_strings()
+        # self.fns_to_strings()
         for key, value in json_dict.items():
+            if print_out:
+                print(f"Setting {key} to {value}")
+            if not key in self.__dict__:
+                logging.warning(f"Unexpected key {key} in config")
             setattr(self, key, value)
         self.strings_to_fns()
         
@@ -272,6 +290,8 @@ class CPPNConfig:
             json_str = json.loads(json_str)
         config = CPPNConfig()
         for key, value in json_str.items():
+            if not key in config.__dict__:
+                logging.warning(f"Unexpected key {key} in config")
             setattr(config, key, value)
         config.strings_to_fns()
         return config
