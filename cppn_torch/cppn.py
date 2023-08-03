@@ -339,10 +339,14 @@ class CPPN():
             lr = self.sgd_lr
         self.outputs = None # reset output
         
+        dtype = self.config.dtype
+        if isinstance(self.config.dtype, str):
+            dtype = getattr(torch, self.config.dtype.replace("torch.",""))
+        
         # make a new computation graph
         for cx in self.connection_genome.values():
             if cx.enabled:
-                cx.weight = torch.nn.Parameter(torch.tensor(cx.weight.detach().item(), requires_grad=True, dtype=self.config.dtype))
+                cx.weight = torch.nn.Parameter(torch.tensor(cx.weight.detach().item(), requires_grad=True, dtype=dtype))
         # exit()
         if create_opt:
             self.optimizer = opt_class(self.get_params(), lr=lr)
@@ -363,6 +367,15 @@ class CPPN():
             node.serialize()
         for _, connection in self.connection_genome.items():
             connection.serialize()
+            
+        if isinstance(self.fitness, torch.Tensor):
+            self.fitness = self.fitness.item()
+        if isinstance(self.novelty, torch.Tensor):
+            self.novelty = self.novelty.item()
+        if isinstance(self.adjusted_fitness, torch.Tensor):
+            self.adjusted_fitness = self.adjusted_fitness.item()
+        if isinstance(self.sgd_lr, torch.Tensor):
+            self.sgd_lr = self.sgd_lr.item()
 
         self.config.serialize()
 
@@ -383,8 +396,8 @@ class CPPN():
         # make copies to keep the CPPN intact
         copy_of_nodes = copy.deepcopy(self.node_genome).items()
         copy_of_connections = copy.deepcopy(self.connection_genome).items()
-        return {"id":self.id, "parents":self.parents, "fitness":self.fitness.item(), "novelty":self.novelty.item(), "node_genome": [n.to_json() for _,n in copy_of_nodes], "connection_genome":\
-            [c.to_json() for _,c in copy_of_connections], "image": img, "config": copy.deepcopy(self.config).to_json()}
+        return {"id":self.id, "parents":self.parents, "fitness":self.fitness, "novelty":self.novelty, "node_genome": [n.to_json() for _,n in copy_of_nodes], "connection_genome":\
+            [c.to_json() for _,c in copy_of_connections], "config": copy.deepcopy(self.config).to_json(), "lineage": self.lineage, "sgd_lr": self.sgd_lr}
 
     def from_json(self, json_dict):
         """Constructs a CPPN from a json dict or string."""
@@ -424,10 +437,17 @@ class CPPN():
         
         self.update_node_layers()
         assert self.config is not None, "Config is None."
+        
+        if not isinstance(self.fitness, torch.Tensor):
+            self.fitness = torch.tensor(self.fitness, device=self.device)
+        if not isinstance(self.novelty, torch.Tensor):
+            self.novelty = torch.tensor(self.novelty, device=self.device)
+        
         type(self).initialize_inputs_from_config(self.config)
+        
 
     @staticmethod
-    def create_from_json(json_dict, config=None, configClass=None):
+    def create_from_json(json_dict, config=None, configClass=None, CPPNClass=None):
         """Constructs a CPPN from a json dict or string."""
         if isinstance(json_dict, str):
             json_dict = json.loads(json_dict, strict=False)
@@ -435,7 +455,9 @@ class CPPN():
             assert configClass is not None, "Either config or configClass must be provided."
             json_dict["config"] = json_dict["config"].replace("cuda", "cpu").replace(":0", "")
             config = configClass.create_from_json(json_dict["config"])
-        i = CPPN(config)
+        if CPPNClass is None:
+            CPPNClass = CPPN
+        i = CPPNClass(config)
         i.from_json(json_dict)
         return i
 
@@ -673,8 +695,12 @@ class CPPN():
         # new node is given a weight of one and the connection between
         # the new node and the last node in the chain
         # is given the same weight as the connection being split
+        dtype = self.config.dtype
+        if isinstance(dtype, str):
+            dtype = getattr(torch, dtype.replace("torch.", ""))
+
         new_cx_1 = Connection(
-            (old_connection.key[0], new_node.id), torch.tensor(1.0, device=self.device,dtype=self.config.dtype, requires_grad=self.config.with_grad))
+            (old_connection.key[0], new_node.id), torch.tensor(1.0, device=self.device,dtype=dtype, requires_grad=self.config.with_grad))
         assert new_cx_1.key not in self.connection_genome.keys()
         self.connection_genome[new_cx_1.key] = new_cx_1
 
@@ -989,15 +1015,24 @@ class CPPN():
         self.outputs = None # new image
     
     def discard_grads(self):
+        
+        dtype = self.config.dtype
+        if isinstance(dtype, str):
+            dtype = getattr(torch, dtype.replace('torch.', ''))
+        
         for _, cx in self.connection_genome.items():
             # check nan
+            if isinstance(cx.weight, float):
+                cx.weight = torch.tensor(cx.weight, device=self.device, dtype=dtype)
             if torch.isnan(cx.weight).any():
                 # TODO: why NaN?
                 cx.weight = torch.tensor(0, device=self.device)
             else:
-                cx.weight = torch.tensor(cx.weight.detach().item(), device=self.device, dtype=self.config.dtype)
+                cx.weight = torch.tensor(cx.weight.detach().item(), device=self.device, dtype=dtype)
         for _, node in self.node_genome.items():
-            node.bias = torch.tensor(node.bias.detach().item(), device=self.device, dtype=self.config.dtype)
+            if isinstance(node.bias, float):
+                node.bias = torch.tensor(node.bias, device=self.device, dtype=dtype)
+            node.bias = torch.tensor(node.bias.detach().item(), device=self.device, dtype=dtype)
         self.reset_activations()
         self.outputs = None # new image
         self.fitness= torch.tensor(self.fitness.detach().item(), device=self.device)
@@ -1225,7 +1260,7 @@ class CPPN():
             # can't clone AOT functions
             del self.aot_fn
 
-        if hasattr(self, 'generator'):
+        if hasattr(self, 'generator') and self.generator is not None:
             generator_state = self.generator.get_state()
             del self.generator
         else:
@@ -1265,11 +1300,13 @@ class CPPN():
 
         out_child.configure_generator()
 
-        
+        dtype = self.config.dtype
+        if isinstance(dtype, str):
+            dtype = getattr(torch, dtype.replace('torch.', ''))
         for n in self.node_genome.values():
-            n.bias = torch.tensor(n.bias.item(), dtype=self.config.dtype, device=self.device)
+            n.bias = torch.tensor(n.bias.item(), dtype=dtype, device=self.device)
         for n in out_child.node_genome.values():
-            n.bias = torch.tensor(n.bias.item(), dtype=self.config.dtype, device=out_child.device)
+            n.bias = torch.tensor(n.bias.item(), dtype=dtype, device=out_child.device)
         return out_child
     
     

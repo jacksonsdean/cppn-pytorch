@@ -147,9 +147,10 @@ class CPPNConfig:
             print(f"Loading config from {self.file}")
             with open(self.file, "r") as f:
                 loaded = json.load(f)
+                use = loaded
                 if "controls" in loaded:
-                    controls = loaded["controls"]
-                self.from_json(controls, print_out=True)
+                    use = loaded["controls"]
+                self.from_json(use, print_out=True)
                 f.close()
         
     def __setattr__(self, key, value):
@@ -214,7 +215,7 @@ class CPPNConfig:
             self.output_activation = self.output_activation.__name__ if\
                 not isinstance(self.output_activation, str) else self.output_activation
 
-        if self.target_name is not None:
+        if hasattr(self, "target_name") and self.target_name is not None:
             self.target = self.target_name
         
         self.dtype = str(self.dtype) # TODO deserialize 
@@ -250,6 +251,9 @@ class CPPNConfig:
             self.fitness_function = None
         self.output_activation = name_to_fn(self.output_activation) if isinstance(self.output_activation, str) else self.output_activation
         
+        if isinstance(self.dtype, str):
+            self.dtype = getattr(torch, self.dtype.removeprefix("torch."))
+        
         if hasattr(self, "fitness_function") and self.fitness_schedule is not None:
             for i, fn in enumerate(self.fitness_schedule):
                 if isinstance(fn, str):
@@ -267,6 +271,8 @@ class CPPNConfig:
         """Converts the configuration from a json string."""
         if isinstance(json_dict, dict):
             json_dict = json.dumps(json_dict)
+            json_dict = json.loads(json_dict)
+        elif isinstance(json_dict, str):
             json_dict = json.loads(json_dict)
         # self.fns_to_strings()
         for key, value in json_dict.items():

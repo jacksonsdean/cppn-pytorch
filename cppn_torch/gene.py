@@ -81,7 +81,7 @@ class Node(Gene):
         return self.id
     @property
     def _gene_attributes(self):
-        return [('activation', self.activation), ('type', self.type)]
+        return [('activation', self.activation), ('type', self.type), ('bias', self.bias)]
     
     def to_cpu(self):
         if self.sum_inputs is not None:
@@ -157,6 +157,10 @@ class Node(Gene):
         self.sum_inputs = None
         self.activation = name_to_fn(self.activation) if isinstance(self.activation, str) else self.activation
         self.type = NodeType(self.type)
+        for name, value in self._gene_attributes:
+            if isinstance(value,float):
+                # convert to tensor
+                setattr(self, name, torch.tensor(value))
 
     def to_json(self):
         """Converts the node to a json string."""
