@@ -392,7 +392,7 @@ class CPPN():
         assert self.config is not None, "Config is None."
 
         self.serialize()
-        img = json.dumps(self.outputs) if self.outputs is not None else None
+        # img = json.dumps(self.outputs) if self.outputs is not None else None
         # make copies to keep the CPPN intact
         copy_of_nodes = copy.deepcopy(self.node_genome).items()
         copy_of_connections = copy.deepcopy(self.connection_genome).items()
@@ -912,6 +912,10 @@ class CPPN():
         layers = feed_forward_layers(self) 
         layers.insert(0, self.input_nodes().keys()) # add input nodes as first layer
         
+        dtype = self.config.dtype
+        if isinstance(dtype, str):
+            dtype = getattr(torch, dtype.replace("torch.", ""))
+        
         # iterate over layers
         for layer in layers:
             Xs, Ws, nodes, Fns = [], [], [], []
@@ -922,18 +926,18 @@ class CPPN():
                 if node.type == NodeType.INPUT:
                     # initialize the node's sum
                     X = inputs[:,:,node_index].repeat(batch_size, 1, 1, 1) # (batch_size, cx, res_h, res_w)
-                    weights = torch.ones((1), dtype=self.config.dtype, device=self.device)
+                    weights = torch.ones((1), dtype=dtype, device=self.device)
                 else:
                     # find incoming connections and activate
                     X, weights = get_incoming_connections_weights(self, node)
                     # X shape = (batch_size, num_incoming, res_h, res_w)
                     if X is None:
-                        X = torch.zeros((batch_size, 1, res_h, res_w), dtype=self.config.dtype, device=self.device)
+                        X = torch.zeros((batch_size, 1, res_h, res_w), dtype=dtype, device=self.device)
                     if weights is None:
-                        weights = torch.ones((1), dtype=self.config.dtype, device=self.device)
+                        weights = torch.ones((1), dtype=dtype, device=self.device)
 
                 if act_mode == 'node':
-                    weights = weights.to(self.config.dtype)
+                    weights = weights.to(dtype)
                     assert torch.isfinite(X).all()
                     if not torch.isfinite(weights).all():
                         # self.draw_nx(show=True)
@@ -1268,6 +1272,11 @@ class CPPN():
         
         out_child = None
         
+        
+        dtype = self.config.dtype
+        if isinstance(dtype, str):
+            dtype = getattr(torch, dtype.replace('torch.', ''))
+        
         id = self.id if (not new_id) else type(self).get_id()
         if deepcopy:
             if self.config.with_grad:
@@ -1282,7 +1291,7 @@ class CPPN():
             child.update_node_layers()
             for cx in child.connection_genome.values():
                 cx.weight = cx.weight.detach()
-                cx.weight = torch.tensor(cx.weight.item(), dtype=self.config.dtype) # require prepare_optimizer() again
+                cx.weight = torch.tensor(cx.weight.item(), dtype=dtype) # require prepare_optimizer() again
 
             out_child = child
         
@@ -1300,9 +1309,6 @@ class CPPN():
 
         out_child.configure_generator()
 
-        dtype = self.config.dtype
-        if isinstance(dtype, str):
-            dtype = getattr(torch, dtype.replace('torch.', ''))
         for n in self.node_genome.values():
             n.bias = torch.tensor(n.bias.item(), dtype=dtype, device=self.device)
         for n in out_child.node_genome.values():
