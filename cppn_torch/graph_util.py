@@ -59,6 +59,10 @@ def name_to_fn(name):
     fns.extend(inspect.getmembers(sys.modules[ff.__name__]))
     
     fns.extend([("round", lambda x: torch.round(x))])
+    
+    if name == "Conv2d":
+        return torch.nn.Conv2d
+    
     try:
         return fns[[f[0] for f in fns].index(name)][1]
     except ValueError:
@@ -67,11 +71,16 @@ def name_to_fn(name):
 
 def choose_random_function(generator, config) -> Callable:
     """Chooses a random activation function from the activation function module."""
-    random_fn = config.activations[torch.randint(0,
-                                                 len(config.activations),
-                                                 (1,), 
-                                                 generator=generator,
-                                                 device=generator.device)[0]]
+    if generator:
+        random_fn = config.activations[torch.randint(0,
+                                                    len(config.activations),
+                                                    (1,), 
+                                                    generator=generator,
+                                                    device=generator.device)[0]]
+    else:
+        random_fn = config.activations[torch.randint(0,
+                                                    len(config.activations),
+                                                    (1,))[0]]
     return random_fn
 
 
@@ -152,13 +161,8 @@ def get_incoming_connections_weights(individual, node):
     cxs = list(filter(lambda x, n=node: x.key[1] == n.id, individual.enabled_connections())) 
     if len(cxs) == 0:
         return None, None
-    if None in [individual.node_genome[c.key[0]].outputs for c in cxs if c.key[0] in individual.node_genome]:
-        print("None in inputs")
-        print(individual.id, [individual.node_genome[c.key[0]].outputs for c in cxs])
-        print(list(individual.enabled_connections()))
-    weights = torch.stack([cx.weight for cx in cxs]).to(individual.device)
-    # print(list(c.key[0] for c in cxs))
-    inputs = torch.stack([individual.node_genome[c.key[0]].outputs for c in cxs], dim=1).to(individual.device)
+    weights = torch.stack([cx.weight for cx in cxs])#.to(individual.device)
+    inputs = torch.stack([individual.node_genome[c.key[0]].outputs for c in cxs], dim=-1)#.to(individual.device)
 
     # weights shape is (num_incoming)
     # inputs shape is (batch, num_incoming, ...)
@@ -348,6 +352,124 @@ def activate_population(genomes, config, inputs = None,  name_to_fn = af.__dict_
 
 
 
+def layer_to_str(cppn, layer, i):
+    if isinstance(layer, Conv2d):
+        return f'CONV {i}\n{layer.kernel_size}x{layer.in_channels}'
+    elif isinstance(layer, torch.nn.MaxPool2d):
+        return f'POOL {i}\n{layer.kernel_size}x{layer.in_channels}'
+    elif isinstance(layer, torch.nn.MultiheadAttention):
+        return f'ATTN {i}\n{layer.num_heads} heads'
+    elif isinstance(layer, torch.nn.Sequential) and isinstance(layer[0], torch.nn.Upsample):
+        return f'UPSAMPLE {i}\nX{layer[0].scale_factor}'
+    elif isinstance(layer, torch.nn.Upsample):
+        return f'UPSAMPLE {i}\nX{layer.scale_factor}'
+    elif isinstance(layer, torch.nn.Flatten):
+        return f'FLATTEN {i}'
+    elif isinstance(layer, torch.nn.Unflatten):
+        return f'UNFLATTEN {i}'
+    elif isinstance(layer, torch.nn.Linear):
+        return f'LINEAR {i}'
+    elif isinstance(layer, Block):
+        return f'RESNET BLOCK {i}'
+
+def to_nx(cppn, only_enabled=True):
+    import networkx as nx
+    G = nx.DiGraph()
+    cppn.update_node_layers()
+    for i, layer in enumerate(cppn.pre_layers):
+        G.add_node(cppn.layer_to_str(layer, i))
+        
+    for i, layer in enumerate(cppn.post_layers):
+        G.add_node(cppn.layer_to_str(layer, i))
+        
+    for i, layer in enumerate(cppn.pre_layers[:-1]):
+        G.add_edge(cppn.layer_to_str(layer, i), cppn.layer_to_str(cppn.pre_layers[i+1], i+1))
+        
+    for i, layer in enumerate(cppn.post_layers[:-1]):
+        G.add_edge(cppn.layer_to_str(layer, i), cppn.layer_to_str(cppn.post_layers[i+1], i+1))
+    
+    if only_enabled:
+        used_nodes = set()
+        for key, cx in cppn.connection_genome.items():
+            if cx.enabled:
+                G.add_edge(key[0], key[1], weight=cx.weight.item())
+                used_nodes.add(key[0])
+                used_nodes.add(key[1])
+                
+        for key, node in cppn.node_genome.items():
+            if key in used_nodes:
+                G.add_node(key, activation=node.activation.__name__)
+    else:
+        for n in cppn.node_genome.values():
+            G.add_node(n.key, type=n.type.name, fn=n.activation)
+        for c in cppn.connection_genome.values():
+            if c.enabled:
+                G.add_edge(c.key[0], c.key[1], weight=c.weight.item())
+            
+    if len(cppn.pre_layers) > 0:
+        last_layer = cppn.pre_layers[-1]
+        last_layer_i = len(cppn.pre_layers)-1
+        for n in cppn.input_nodes().values():
+            G.add_edge(cppn.layer_to_str(last_layer, last_layer_i), n.key)
+            
+    if len(cppn.post_layers) > 0:
+        first_layer = cppn.post_layers[0]
+        first_layer_i = 0
+        for n in cppn.output_nodes().values():
+            G.add_edge(n.key, cppn.layer_to_str(first_layer, first_layer_i))
+    return G
+
+
+def to_networkx(cppn):
+    cppn.update_node_layers()
+    G = nx.DiGraph()
+    used_nodes = set()
+    for key, cx in cppn.connection_genome.items():
+        if cx.enabled:
+            G.add_edge(key[0], key[1], weight=cx.weight.item())
+            used_nodes.add(key[0])
+            used_nodes.add(key[1])
+            
+    for key, node in cppn.node_genome.items():
+        if key in used_nodes:
+            G.add_node(key, activation=node.activation.__name__)
+    
+    return G
+
+def draw_nx(cppn, size=(10,20), show=True):
+    import matplotlib.pyplot as plt
+    import networkx as nx
+    from networkx.drawing.nx_agraph import graphviz_layout
+    fig = plt.figure(figsize=size)
+    G = cppn.to_nx()
+    args = "-Grankdir=LR"
+
+    pos = graphviz_layout(G, prog='dot', args=args)
+    
+    
+    
+    nx.draw_networkx(
+        G,
+        with_labels=True,
+        pos=pos,
+        labels={n:f"{cppn.node_genome[n].layer}.{n}\n{cppn.node_genome[n].activation.__name__[:4]}\n"#{1}xHxW"
+                if n in cppn.node_genome else n
+                for n in G.nodes(data=False) },
+        node_size=800,
+        font_size=6,
+        node_shape='s',
+        node_color=['lightsteelblue' if n in cppn.node_genome else 'lightgreen' for n in G.nodes()  ]
+        )
+    plt.annotate('# params: ' + str(cppn.num_params), xy=(1.0, 1.0), xycoords='axes fraction', fontsize=12, ha='right', va='top')
+    
+    plt.tight_layout()
+    plt.axis('off')
+    if show:
+        plt.show()
+
+
+
+
 # Functions below are modified from other packages
 # This is necessary because AWS Lambda has strict space limits,
 # and we only need a few methods, not the entire packages.
@@ -467,13 +589,26 @@ def feed_forward_layers(individual):
 
     layers = []
     s = set(inputs)
+    
+    dangling_inputs = set()
+    for n in required:
+        has_input = False
+        for (a, b) in connections:
+            if b == n:
+                has_input = True
+                break
+    
+    # add dangling inputs to the input set
+    s = s.union(dangling_inputs)
+    
     while 1:
 
         c = get_candidate_nodes(s, connections)
         # Keep only the used nodes whose entire input set is contained in s.
         t = set()
         for n in c:
-            if n in required and all(a in s for (a, b) in connections if b == n):
+            entire_input_set_in_s = all(a in s for (a, b) in connections if b == n)
+            if n in required and entire_input_set_in_s:
                 t.add(n)
         # t = set(a for (a, b) in connections if b in s and a not in s)
         if not t:
@@ -482,7 +617,6 @@ def feed_forward_layers(individual):
         layers.append(t)
         s = s.union(t)
     return layers
-
 
 
 # FROM: https://github.com/limacv/RGB_HSV_HSL

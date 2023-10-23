@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cppn_torch"
-version = "2023.0.25"
+version = "2023.0.26"
 description = "CPPN implementation in PyTorch"
 authors = [
     {name = "Jackson Dean", email = "jackson@downbeat.games"}

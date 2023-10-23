@@ -2,6 +2,7 @@ from enum import IntEnum
 import json
 from typing import Callable
 import torch
+from copy import deepcopy
 from cppn_torch.activation_functions import identity
 
 from cppn_torch.graph_util import name_to_fn
@@ -16,10 +17,13 @@ class Gene(object):
     """Represents either a node or connection in the CPPN"""
     def __init__(self, key=None) -> None:
         pass
-    def copy(self):
+    def copy(self,deep=False):
         new_gene = self.__class__(key=self.key)
         for name, value in self._gene_attributes:
-            setattr(new_gene, name, value)
+            if deep:
+                setattr(new_gene, name, deepcopy(value))
+            else:
+                setattr(new_gene, name, value)
 
         return new_gene
     
@@ -38,7 +42,7 @@ class Gene(object):
         assert self.key == other.key,\
             f"Cannot crossover genes with different keys {self.key!r} and {other.key!r}"
         
-        assert isinstance(self.key, tuple), "Cannot crossover genes with non-tuple keys"
+        # assert isinstance(self.key, tuple), f"Cannot crossover genes with non-tuple keys, has type {type(self.key)} key: {self.key}"
         new_gene = self.__class__(self.key)
 
         for name, value in self._gene_attributes:
@@ -66,7 +70,9 @@ class Node(Gene):
         return Node(0, identity, NodeType.HIDDEN, 0)
 
     def __init__(self, key, activation=None, _type=2, _layer=999, node_agg="sum", device="cpu", grad=True) -> None:
+        self.device = device
         self.activation = activation
+        self.set_activation(activation)
         self.id = key
         self.type = _type
         self.layer = _layer
@@ -74,6 +80,7 @@ class Node(Gene):
         self.outputs = None
         self.agg = node_agg
         self.bias = torch.zeros(1, device=device, requires_grad=grad)
+        self.activation_params = []
         super().__init__()
     
     @property
@@ -83,37 +90,36 @@ class Node(Gene):
     def _gene_attributes(self):
         return [('activation', self.activation), ('type', self.type), ('bias', self.bias)]
     
-    def to_cpu(self):
-        if self.sum_inputs is not None:
-            self.sum_inputs = self.sum_inputs.cpu()
-        if self.outputs is not None:
-            self.outputs = self.outputs.cpu()
-        if self.bias is not None:
-            self.bias = self.bias.cpu()
-    def to_cuda(self, device):
-        if self.sum_inputs is not None:
-            self.sum_inputs = self.sum_inputs.cuda(device)
-        if self.outputs is not None:
-            self.outputs = self.outputs.cuda(device)
-        if self.bias is not None:
-            self.bias = self.bias.cuda(device)
+    def set_activation(self, activation):
+        self.activation = activation
+        self.activation_params = []
+        if activation == torch.nn.Conv2d:
+            # keep dims same (h,w) -> (h,w)
+            self.activation = activation(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
+            # self.activation.weight.data.fill_(1.0)
+            self.activation = self.activation.to(self.device)
+            self.activation_params = list(self.activation.parameters())
+            self.activation.__name__ = "Conv2d"
+   
+    def params(self):
+        return [self.bias] + self.activation_params
 
     def activate(self, X, W):
         """Activates the node given a list of connections that end here."""
-        assert isinstance(self.activation, Callable), "activation function is not a function"
-    
+        assert isinstance(self.activation, Callable), f"activation function <{self.activation}> is not a function"
+
         if X is None:
             return
         if W is None:
             self.outputs = self.activation(X) + self.bias
             return
         
-        X = X.permute(1, 0, 2, 3) # (num_incoming, batch_size, ...)
+        # X_shape = (h,w,c)
+        # W_shape = (c)
         
         if self.agg == 'sum':
-            # self.sum_inputs = torch.matmul(W, X) # slower for small matrices (?)
-            for x, w in zip(X, W):
-                self.sum_inputs += x*w
+            self.sum_inputs =torch.matmul(X, W) # (h,w,c) * (c) = (h,w)
+            self.sum_inputs += self.bias
             
         else:
             X_shape = X.shape[1:]
@@ -133,7 +139,10 @@ class Node(Gene):
             self.sum_inputs = self.sum_inputs.reshape(X_shape) # reshape back to original shape
         
         self.sum_inputs += self.bias
-        self.outputs = self.activation(self.sum_inputs)  # apply activation
+        if not isinstance(self.activation, torch.nn.Conv2d):
+            self.outputs = self.activation(self.sum_inputs)  # apply activation
+        else:
+            self.outputs = self.activation(self.sum_inputs.unsqueeze(0)).squeeze(0)
 
     def initialize_sum(self, initial_sum):
         """Activates the node."""
@@ -147,7 +156,7 @@ class Node(Gene):
         self.sum_inputs = None
         self.outputs = None
         self.bias = self.bias.item() if isinstance(self.bias, torch.Tensor) else self.bias
-
+        self.device = str(self.device)
         if isinstance(self.activation, Callable):
             self.activation = self.activation.__name__
     
@@ -157,6 +166,7 @@ class Node(Gene):
         self.sum_inputs = None
         self.activation = name_to_fn(self.activation) if isinstance(self.activation, str) else self.activation
         self.type = NodeType(self.type)
+        self.device = torch.device(self.device)
         for name, value in self._gene_attributes:
             if isinstance(value,float):
                 # convert to tensor
@@ -178,10 +188,13 @@ class Node(Gene):
     
     def to(self, device):
         self.bias = self.bias.to(device)
+        self.device = device
         if self.sum_inputs is not None:
             self.sum_inputs = self.sum_inputs.to(device)
         if self.outputs is not None:
             self.outputs = self.outputs.to(device)
+        if isinstance(self.activation, torch.nn.Conv2d):
+            self.activation = self.activation.to(device)
         return self
 
 class Connection(Gene):
@@ -206,6 +219,12 @@ class Connection(Gene):
         assert type(self.key_) is tuple, "key is not a tuple"
         return self.key_
     @property
+    def from_node(self):
+        return self.key_[0]
+    @property
+    def to_node(self):
+        return self.key_[1]
+    @property
     def _gene_attributes(self):
         return [('weight', self.weight), ('enabled', self.enabled)]
     
@@ -215,14 +234,6 @@ class Connection(Gene):
     def deserialize(self):
         pass
     
-    def to_cpu(self):
-        assert isinstance(self.weight, torch.Tensor), "weight is not a tensor"
-        self.weight = self.weight.cpu()
-        
-    def to_cuda(self, device):
-        assert isinstance(self.weight, torch.Tensor), "weight is not a tensor"
-        self.weight = self.weight.cuda(device)
-
     def to_json(self):
         """Converts the connection to a json string."""
         return json.dumps(self.__dict__)
@@ -246,7 +257,7 @@ class Connection(Gene):
         return self.__repr__()
     def __repr__(self):
         return f"([{self.key[0]}->{self.key[1]}] "+\
-            f"W:{self.weight:3f} E:{int(self.enabled)} R:{int(self.is_recurrent)})"
+            f"W:{self.weight.item():3f} E:{int(self.enabled)} R:{int(self.is_recurrent)})"
     
     def to(self, device):
         self.weight = self.weight.to(device)

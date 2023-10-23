@@ -28,6 +28,10 @@ def linear(x):
     """Returns the linear of the input."""
     return torch.minimum(torch.maximum(x, torch.tensor(-3.0)), torch.tensor(3.0)) / 3.0
 
+def clip(x):
+    """Returns the linear of the input."""
+    return torch.clip(x, -1.0, 1.0)
+
 def tanh(x):
     """Returns the hyperbolic tangent of the input."""
     y = torch.tanh(2.5*x)
@@ -80,6 +84,7 @@ def cos(x):
     y =  torch.cos(x*math.pi)
     return y
 
+
 # def gauss(x, mean=0.0, std=1.0):
 #     """Returns the gaussian of the input."""
 #     y = 2*torch.exp(-6.0 * (x-mean) ** 2/std**2)-1.0 
@@ -116,3 +121,4 @@ def tanh_softsign(x):
 
 def tanh_softsign_norm(x):
     return 0.5+tanh_softsign(x)
+

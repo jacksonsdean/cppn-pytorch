@@ -9,6 +9,9 @@ import random
 from cppn_torch.graph_util import activate_layer
 import torch
 from torch.nn import ConvTranspose2d, Conv2d
+import copy
+from copy import Error, _deepcopy_dispatch, _deepcopy_atomic, _keep_alive, _reconstruct
+from copyreg import dispatch_table
 import networkx as nx
 import logging
 from torch import nn
@@ -16,12 +19,16 @@ from functorch.compile import compiled_function, draw_graph, aot_function
 from cppn_torch.activation_functions import identity
 import cppn_torch.activation_functions as af
 from cppn_torch.graph_util import *
-from cppn_torch.config import CPPNConfig as Config
+# from cppn_torch.config import CPPNConfig as Config
 from cppn_torch.gene import * 
 from cppn_torch.util import upscale_conv2d, random_choice, random_normal, random_uniform, gaussian_blur
 
+from torchviz import make_dot
 
-class CPPN():
+
+dtype = torch.float32
+
+class CPPN(nn.Module):
     """A CPPN Object with Nodes and Connections."""
 
     constant_inputs = None # (res_h, res_w, n_inputs)
@@ -81,7 +88,7 @@ class CPPN():
                                         config.device,
                                         config.coord_range,
                                         CPPN,
-                                        torch.float32
+                                        dtype
                                         )
 
     @staticmethod
@@ -89,32 +96,39 @@ class CPPN():
         __class__.current_id += 1
         return __class__.current_id - 1
     
-    def __init__(self, config = Config(), nodes = None, connections = None, do_reconfig=True) -> None:
+    @staticmethod
+    def create_from_json(json_dict, config=None, configClass=None, CPPNClass=None):
+        """Constructs a CPPN from a json dict or string."""
+        if isinstance(json_dict, str):
+            json_dict = json.loads(json_dict, strict=False)
+        if config is None:
+            assert configClass is not None, "Either config or configClass must be provided."
+            json_dict["config"] = json_dict["config"].replace("cuda", "cpu").replace(":0", "")
+            config = configClass.create_from_json(json_dict["config"])
+        if CPPNClass is None:
+            CPPNClass = CPPN
+        i = CPPNClass(config)
+        i.from_json(json_dict)
+        return i
+
+    
+    def __init__(self, config, nodes = None, connections = None) -> None:
         """Initialize a CPPN."""
-        self.config = config
-        assert self.config is not None
-        self.device = self.config.device
+        super().__init__()
+        self.device = config.device
         self.outputs = None
+        self.normalize_outputs = config.normalize_outputs # todo unused in CPPN
         self.node_genome = {}
         self.connection_genome = {}
-        self.species_id = 0
         self.id = type(self).get_id()
         
-        if do_reconfig:
-            self.reconfig(self.config, nodes, connections)
+        self.reconfig(config, nodes, connections)
         
-        self.parents = (0, 0)
-        self.fitness = torch.tensor(-torch.inf, device=self.device)
-        self.novelty = torch.tensor(-torch.inf, device=self.device)
-        self.adjusted_fitness = torch.tensor(-torch.inf, device=self.device)
-        
+        self.parents = (-1, -1)
         self.age = 0
         self.lineage = []
     
-    def __call__(self, *args, **kwargs):
-        # wrapper for forward
-        return self.forward(*args, **kwargs)
-    
+
          
     @property
     def params(self):
@@ -123,81 +137,34 @@ class CPPN():
     @property
     def num_params(self):
         cppn_len = len(self.get_cppn_params())
-        for layer in self.pre_layers:
-            for p in layer.parameters():
-                cppn_len += p.numel()
-        for layer in self.post_layers:
-            for p in layer.parameters():
-                cppn_len += p.numel()
         return cppn_len
     
-    def configure_generator(self):
-        if self.config.seed is not None:
-            self.seed = (self.config.seed + self.id) % 2**32
-        else:
-            self.seed = random.randint(0, 2**32 - 1)
-        self.generator = torch.Generator(device=self.device)
-        self.generator.manual_seed(self.seed)
-
-    
+   
     def reconfig(self, config = None, nodes = None, connections = None):
-        if config is not None:
-            self.config = config
-        assert self.config is not None
-     
-        self.device = self.config.device
+        self.device = config.device
             
         if self.device is None:
             raise ValueError("device is None") 
 
-        self.configure_generator()
-        
-        self.n_outputs = len(self.config.color_mode) # RGB: 3, HSV: 3, L: 1
-        
-        self.pre_layers = []
-        
-        self.n_in_nodes = self.config.num_inputs
-        
-        if self.config.num_conv > 0:
-            last_c = 8
-            self.pre_layers.append(Conv2d(self.config.num_inputs, last_c, kernel_size=5, stride=1, padding=2, bias=False).to(self.device))
-            self.pre_layers[-1] = self.pre_layers[-1].to(self.device)
-            for _ in range(self.config.num_conv-1):
-                self.pre_layers.append(Conv2d(last_c, 3, kernel_size=5, stride=1, padding=2, bias=False))
-                last_c = 3
-                self.pre_layers[-1] = self.pre_layers[-1].to(self.device)
-            self.n_in_nodes = last_c
-            
+        self.n_outputs = len(config.color_mode) # RGB: 3, HSV: 3, L: 1
+        self.n_in_nodes = config.num_inputs
+       
         if nodes is None:
-            self.initialize_node_genome()
+            self.initialize_node_genome(config)
         else:
             self.node_genome = nodes
         if connections is None:
-            self.initialize_connection_genome()
+            self.initialize_connection_genome(config)
         else:
             self.connection_genome = connections
         
-        self.disable_invalid_connections()
+        self.disable_invalid_connections(config)
         
-        F = 3
-        S = 1
-        P = 1
+        self.sgd_lr = config.sgd_learning_rate
         
-        self.post_layers = []
-        num_channels = len(self.config.color_mode)
-        flat_size = self.config.res_h*self.config.res_w*num_channels
+        self.output_blur = config.output_blur
         
-        for _ in range(self.config.num_upsamples):
-            self.post_layers.append(Block(num_channels, num_channels))
-            self.post_layers[-1] = self.post_layers[-1].to(self.device)
-     
-        for _ in range(self.config.num_post_conv):
-            self.post_layers.append(nn.Conv2d(num_channels, num_channels, kernel_size=3, stride=1, padding=1, bias=True))
-            self.post_layers[-1] = self.post_layers[-1].to(self.device)
-        
-        self.config._not_dirty()
-        
-        self.sgd_lr = self.config.sgd_learning_rate
+        self.color_mode = config.color_mode
         
 
     def get_new_node_id(self):
@@ -217,73 +184,75 @@ class CPPN():
     def set_id(self, id):
         self.id = id
         
-    def initialize_node_genome(self):
+    def vis(self, fname='cppn_graph'):
+        """Visualize the CPPN."""
+        make_dot(self.outputs).render(fname, format="pdf")
+        
+    def initialize_node_genome(self, config):
         """Initializes the node genome."""
-        assert self.config is not None
         n_in = self.n_in_nodes
         n_out = self.n_outputs  
+        n_hidden = config.hidden_nodes_at_start
        
-        n_hidden = self.config.hidden_nodes_at_start
         if isinstance(n_hidden, int):
             n_hidden = [n_hidden]
         
         output_layer_idx = 1+len(n_hidden) if sum(n_hidden) > 0 else 1
-        total_node_count = n_in + n_out + sum(n_hidden)
         
         # Input nodes:
         for idx in range(n_in):
-            fn = identity if not self.config.allow_input_activation_mutation else choose_random_function(self.generator, self.config)
-            new_node = Node(-(1+idx), fn, NodeType.INPUT, 0, self.config.node_agg, self.device, grad=self.config.with_grad)
+            fn = identity if not config.allow_input_activation_mutation else random_choice(config.activations)
+            new_node = Node(-(1+idx), fn, NodeType.INPUT, 0, config.node_agg, self.device, grad=config.with_grad)
             self.node_genome[new_node.key] = new_node
             
         # Output nodes:
         for idx in range(n_in, n_in + n_out):
-            if self.config.output_activation is None:
-                output_fn = choose_random_function(self.generator, self.config)
+            if config.output_activation is None:
+                output_fn = random_choice(config.activations)
             else:
-                output_fn = self.config.output_activation
-            new_node = Node(-(1+idx), output_fn, NodeType.OUTPUT, output_layer_idx, self.config.node_agg, self.device, grad=self.config.with_grad)
+                output_fn = config.output_activation
+            new_node = Node(-(1+idx), output_fn, NodeType.OUTPUT, output_layer_idx, config.node_agg, self.device, grad=config.with_grad)
             self.node_genome[new_node.key] = new_node
         
         # the rest are hidden:
-        # for idx in range(n_in + n_out, total_node_count):
         for hidden_layer_idx, layer_size in enumerate(n_hidden):
             for idx in range(layer_size):
-                new_node = Node(self.get_new_node_id(), choose_random_function(self.generator, self.config),
-                                NodeType.HIDDEN, 1+hidden_layer_idx, self.config.node_agg, self.device, grad=self.config.with_grad)
+                new_node = Node(self.get_new_node_id(), random_choice(config.activations),
+                                NodeType.HIDDEN, 1+hidden_layer_idx, config.node_agg, self.device, grad=config.with_grad)
                 self.node_genome[new_node.key] = new_node
 
-    def initialize_connection_genome(self):
+    def initialize_connection_genome(self, config):
         """Initializes the connection genome."""
-        assert self.config is not None, "Config is None."
-
-        n_hidden = self.config.hidden_nodes_at_start
+        n_hidden = config.hidden_nodes_at_start
         if isinstance(n_hidden, int):
             n_hidden = [n_hidden]
         output_layer_idx = 1+len(n_hidden)
+
+        std = config.weight_init_std
 
         # connect all layers to the next layer
         for layer_idx in range(output_layer_idx):
             for from_node in self.get_layer(layer_idx):
                 for to_node in self.get_layer(layer_idx+1):
                     new_cx = Connection(
-                        (from_node.id, to_node.id), self.random_weight())
+                        (from_node.id, to_node.id), self.random_weight(False, std))
                     self.connection_genome[new_cx.key] = new_cx
-                    if torch.rand(1)[0] > self.config.init_connection_probability:
+                    if torch.rand(1)[0] > config.init_connection_probability:
                         new_cx.enabled = False
         
         # also connect inputs to outputs directly:
-        if self.config.dense_init_connections and sum(n_hidden) > 0:
+        if config.dense_init_connections and sum(n_hidden) > 0:
             for from_node in self.get_layer(0):
                 for to_node in self.get_layer(output_layer_idx):
                     new_cx = Connection(
-                        (from_node.id, to_node.id), self.random_weight())
+                        (from_node.id, to_node.id), self.random_weight(False, std))
                     self.connection_genome[new_cx.key] = new_cx
-                    if torch.rand(1)[0] > self.config.init_connection_probability:
+                    if torch.rand(1)[0] > config.init_connection_probability:
                         new_cx.enabled = False
         
 
-    def get_cppn_params(self):
+    def get_params(self):
+        """Returns a list of all parameters in the network."""
         params = []
         required_nodes = required_for_output(*get_ids_from_individual(self))
         
@@ -291,62 +260,30 @@ class CPPN():
         required_cxs = set()
         for node_id in required_nodes:
             for cx in self.connection_genome.values():
-                if cx.enabled and cx.key[1] == node_id:
+                if cx.enabled and cx.key[1] == node_id and cx.key[0] in required_nodes:
                     required_cxs.add(cx.key)
         
         for cx in self.connection_genome.values():
             if cx.enabled and cx.key in required_cxs:
                 params.append(cx.weight)
        
-        # for n in self.node_genome.values():
-        #     if n.key in required_nodes:
-        #         params.append(n.bias)
+        for n in self.node_genome.values():
+            if n.key in required_nodes:
+                params.extend(n.params())
         
         return params
     
-    def get_params(self):
-        """Returns a list of all parameters in the network."""
-        params = self.get_cppn_params()
-        params.extend(self.get_pre_params())
-        params.extend(self.get_post_params())
-        return params
     
-    def get_post_params(self):
-        """Returns a list of all parameters in the network."""
-        params = []
-        for layer in self.post_layers:
-            params.extend(list(layer.parameters()))
-        return params
-    def get_pre_params(self):
-        """Returns a list of all parameters in the network."""
-        params = []
-        for layer in self.pre_layers:
-            params.extend(list(layer.parameters()))
-        return params
-    
-    def get_named_params(self):
-        """Returns a dict of all parameters in the network."""
-        params = {}
-        for cx in self.connection_genome.values():
-            if cx.enabled:
-                params[f"w_{cx.key}"] = cx.weight
-        return params
-
     def prepare_optimizer(self, opt_class=torch.optim.Adam, lr=None, create_opt=False):
         """Prepares the optimizer."""
-        assert self.config is not None, "Config is None."
         if lr is None:
             lr = self.sgd_lr
         self.outputs = None # reset output
         
-        dtype = self.config.dtype
-        if isinstance(self.config.dtype, str):
-            dtype = getattr(torch, self.config.dtype.replace("torch.",""))
-        
         # make a new computation graph
         for cx in self.connection_genome.values():
             if cx.enabled:
-                cx.weight = torch.nn.Parameter(torch.tensor(cx.weight.detach().item(), requires_grad=True, dtype=dtype))
+                cx.weight = torch.nn.Parameter(torch.tensor(cx.weight.detach().item(), requires_grad=True, dtype=dtype, device = self.device))
         # exit()
         if create_opt:
             self.optimizer = opt_class(self.get_params(), lr=lr)
@@ -357,9 +294,7 @@ class CPPN():
         
     def serialize(self):
         # del type(self).constant_inputs
-        assert self.config is not None, "Config is None."
         type(self).constant_inputs = None
-        self.generator = None
         if self.outputs is not None:
             self.outputs = self.outputs.cpu().numpy().tolist() if\
                 isinstance(self.outputs, torch.Tensor) else self.outputs
@@ -368,19 +303,10 @@ class CPPN():
         for _, connection in self.connection_genome.items():
             connection.serialize()
             
-        if isinstance(self.fitness, torch.Tensor):
-            self.fitness = self.fitness.item()
-        if isinstance(self.novelty, torch.Tensor):
-            self.novelty = self.novelty.item()
-        if isinstance(self.adjusted_fitness, torch.Tensor):
-            self.adjusted_fitness = self.adjusted_fitness.item()
         if isinstance(self.sgd_lr, torch.Tensor):
             self.sgd_lr = self.sgd_lr.item()
 
-        self.config.serialize()
-
     def deserialize(self):
-        assert self.config is not None, "Config is None."
         for _, node in self.node_genome.items():
             node.deserialize()
         for _, connection in self.connection_genome.items():
@@ -389,15 +315,14 @@ class CPPN():
         
     def to_json(self):
         """Converts the CPPN to a json dict."""
-        assert self.config is not None, "Config is None."
 
         self.serialize()
         # img = json.dumps(self.outputs) if self.outputs is not None else None
         # make copies to keep the CPPN intact
         copy_of_nodes = copy.deepcopy(self.node_genome).items()
         copy_of_connections = copy.deepcopy(self.connection_genome).items()
-        return {"id":self.id, "parents":self.parents, "fitness":self.fitness, "novelty":self.novelty, "node_genome": [n.to_json() for _,n in copy_of_nodes], "connection_genome":\
-            [c.to_json() for _,c in copy_of_connections], "config": copy.deepcopy(self.config).to_json(), "lineage": self.lineage, "sgd_lr": self.sgd_lr}
+        return {"id":self.id, "parents":self.parents, "node_genome": [n.to_json() for _,n in copy_of_nodes], "connection_genome":\
+            [c.to_json() for _,c in copy_of_connections], "lineage": self.lineage, "sgd_lr": self.sgd_lr}
 
     def from_json(self, json_dict):
         """Constructs a CPPN from a json dict or string."""
@@ -436,42 +361,12 @@ class CPPN():
                 f"Node is a {type(self.node_genome[key])}: {self.node_genome[key]}"
         
         self.update_node_layers()
-        assert self.config is not None, "Config is None."
-        
-        if not isinstance(self.fitness, torch.Tensor):
-            self.fitness = torch.tensor(self.fitness, device=self.device)
-        if not isinstance(self.novelty, torch.Tensor):
-            self.novelty = torch.tensor(self.novelty, device=self.device)
-        
-        type(self).initialize_inputs_from_config(self.config)
         
 
-    @staticmethod
-    def create_from_json(json_dict, config=None, configClass=None, CPPNClass=None):
-        """Constructs a CPPN from a json dict or string."""
-        if isinstance(json_dict, str):
-            json_dict = json.loads(json_dict, strict=False)
-        if config is None:
-            assert configClass is not None, "Either config or configClass must be provided."
-            json_dict["config"] = json_dict["config"].replace("cuda", "cpu").replace(":0", "")
-            config = configClass.create_from_json(json_dict["config"])
-        if CPPNClass is None:
-            CPPNClass = CPPN
-        i = CPPNClass(config)
-        i.from_json(json_dict)
-        return i
-
-    def random_weight(self):
+    def random_weight(self, grad=False, std=1.0, mean=0.0):
         """Returns a random weight between -max_weight and max_weight."""
-        assert self.config is not None, "Config is None."
-        # return random_uniform(self.generator,
-        #                       -self.config.max_weight,
-        #                       self.config.max_weight,
-        #                       grad=self.config.with_grad)
-        return random_normal(self.generator,
-                              0.0,
-                              self.config.weight_init_std,
-                              grad=self.config.with_grad).float()
+        return torch.randn(1, device=self.device, requires_grad=grad)[0] * std + mean
+
 
     def enabled_connections(self):
         """Returns a yield of enabled connections."""
@@ -479,180 +374,203 @@ class CPPN():
             if connection.enabled:
                 yield connection
                 
+                
     def count_enabled_connections(self):
         """Returns the number of enabled connections."""
         return sum(1 for _ in self.enabled_connections())
+    
     
     def count_nodes(self):
         """Returns the number of nodes."""
         return len(self.node_genome)
     
+    
     def count_activation_functions(self):
         """Returns the number of unique activation functions."""
         return len(set([n.activation for n in self.node_genome.values()]))
     
-    def mutate_activations(self, prob):
+     
+    def depth(self):
+        """Returns the depth of the network."""
+        return len(self.get_layers())
+    
+    
+    def width(self, agg=max):
+        """Returns the width of the network."""
+        return agg([len(layer) for layer in self.get_layers().values()])
+    
+    
+    def input_nodes(self) -> dict:
+        """Returns a dict of all input nodes."""
+        return {n.id: n for n in self.node_genome.values() if n.type == NodeType.INPUT}
+
+
+    def output_nodes(self) -> dict:
+        """Returns a dict of all output nodes."""
+        return {n.id: n for n in self.node_genome.values() if n.type == NodeType.OUTPUT}
+
+
+    def hidden_nodes(self) -> dict:
+        """Returns a dict of all hidden nodes."""
+        return {n.id: n for n in self.node_genome.values() if n.type == NodeType.HIDDEN}
+    
+    def get_named_params(self):
+        """Returns a dict of all parameters in the network."""
+        params = {}
+        for cx in self.connection_genome.values():
+            if cx.enabled:
+                params[f"w_{cx.key}"] = cx.weight
+        return params
+    
+    def named_parameters(self):
+        """In torch format"""
+        return self.get_named_params()
+
+    
+    
+    def mutate_activations(self, prob, config):
         """Mutates the activation functions of the nodes."""
-        assert self.config is not None, "Config is None."
-        if len(self.config.activations) == 1:
+        if len(config.activations) == 1:
             return # no point in mutating if there is only one activation function
 
         eligible_nodes = list(self.hidden_nodes().values())
-        if self.config.output_activation is None:
+        if config.output_activation is None:
             eligible_nodes.extend(self.output_nodes().values())
-        if self.config.allow_input_activation_mutation:
+        if config.allow_input_activation_mutation:
             eligible_nodes.extend(self.input_nodes().values())
         for node in eligible_nodes:
-            if random_uniform(self.generator,0,1) < prob:
-                node.activation = choose_random_function(self.generator,self.config)
+            if torch.rand(1)[0] < prob:
+                node.set_activation(random_choice(config.activations))
         self.outputs = None # reset the image
 
-    def mutate_weights(self, prob):
+
+    def mutate_weights(self, prob, config):
         """
         Each connection weight is perturbed with a fixed probability by
         adding a floating point number chosen from a uniform distribution of
         positive and negative values """
-        assert self.config is not None, "Config is None."
-        R_delta = torch.rand(len(self.connection_genome.items()),generator=self.generator, device=self.generator.device)
-        R_reset = torch.rand(len(self.connection_genome.items()),generator=self.generator, device=self.generator.device)
+        R_delta = torch.rand(len(self.connection_genome.items()), device=self.device)
+        R_reset = torch.rand(len(self.connection_genome.items()), device=self.device)
 
         for i, connection in enumerate(self.connection_genome.values()):
             if R_delta[i] < prob:
-                delta = random_normal(self.generator, 0,
-                                               self.config.weight_mutation_std)
+                delta = random_normal(None, 0, config.weight_mutation_std)
                 connection.weight = connection.weight + delta
-            elif R_reset[i] < self.config.prob_weight_reinit:
+            elif R_reset[i] < config.prob_weight_reinit:
                 connection.weight = self.random_weight()
 
         # self.clamp_weights()
         self.outputs = None # reset the image
 
-    def mutate_bias(self, prob):
-        """
-        """
-        assert self.config is not None, "Config is None."
-        R_delta = torch.rand(len(self.node_genome.items()),generator=self.generator, device=self.generator.device)
-        R_reset = torch.rand(len(self.node_genome.items()),generator=self.generator, device=self.generator.device)
+
+    def mutate_bias(self, prob, config):
+        R_delta = torch.rand(len(self.node_genome.items()), device=self.device)
+        R_reset = torch.rand(len(self.node_genome.items()), device=self.device)
 
         for i, node in enumerate(self.node_genome.values()):
             if R_delta[i] < prob:
-                delta = random_normal(self.generator, 0,
-                                               self.config.bias_mutation_std)
+                delta = random_normal(None, 0, config.bias_mutation_std)
                 node.bias = node.bias + delta
-            elif R_reset[i] < self.config.prob_weight_reinit:
+            elif R_reset[i] < config.prob_weight_reinit:
                 node.bias = torch.zeros_like(node.bias)
 
-        self.clamp_weights()
         self.outputs = None # reset the image
         
+        
     def mutate_lr(self, sigma):
-        """Mutates the learning rate."""
         if not sigma:
             return # don't mutate
-        assert self.config is not None, "Config is None."
-        self.sgd_lr = self.sgd_lr + random_normal(self.generator, 0, sigma)
+        self.sgd_lr = self.sgd_lr + random_normal(None, 0, sigma)
         self.sgd_lr = max(1e-8, self.sgd_lr)
         self.outputs = None
-        
-    
-    def depth(self):
-        """Returns the depth of the network."""
-        return len(self.get_layers())
-    
-    def width(self, agg=max):
-        """Returns the width of the network."""
-        return agg([len(layer) for layer in self.get_layers().values()])
+   
 
-    def mutate(self, rates=None):
+    def mutate(self, config, rates=None):
         """Mutates the CPPN based on its config or the optionally provided rates."""
-        self.fitness, self.adjusted_fitness, self.novelty = torch.tensor(-torch.inf,device=self.device), torch.tensor(-torch.inf,device=self.device), torch.tensor(-torch.inf,device=self.device) # new fitnesses after mutation
-        assert self.config is not None, "Config is None."
         if rates is None:
-            add_node = self.config.prob_add_node
-            add_connection = self.config.prob_add_connection
-            remove_node = self.config.prob_remove_node
-            disable_connection = self.config.prob_disable_connection
-            mutate_weights = self.config.prob_mutate_weight
-            mutate_bias = self.config.prob_mutate_bias
-            mutate_activations = self.config.prob_mutate_activation
-            mutate_sgd_lr_sigma = self.config.mutate_sgd_lr_sigma
+            add_node = config.prob_add_node
+            add_connection = config.prob_add_connection
+            remove_node = config.prob_remove_node
+            disable_connection = config.prob_disable_connection
+            mutate_weights = config.prob_mutate_weight
+            mutate_bias = config.prob_mutate_bias
+            mutate_activations = config.prob_mutate_activation
+            mutate_sgd_lr_sigma = config.mutate_sgd_lr_sigma
         else:
             mutate_activations, mutate_weights, mutate_bias, add_connection, add_node, remove_node, disable_connection, weight_mutation_max, prob_reenable_connection = rates
         
-        rng = lambda: random_uniform(self.generator,0.0,1.0)
-        for _ in range(self.config.mutation_iters):
-            if self.config.single_structural_mutation:
+        rng = lambda: random_uniform(None,0.0,1.0)
+        for _ in range(config.mutation_iters):
+            if config.single_structural_mutation:
                 div = max(1.0, (add_node + remove_node +
                                 add_connection + disable_connection))
-                
-                
                 r = rng()
                 if r < (add_node / div):
-                    self.add_node()
+                    self.add_node(config)
                 elif r < ((add_node + remove_node) / div):
-                    self.remove_node()
+                    self.remove_node(config)
                 elif r < ((add_node + remove_node +
                             add_connection) / div):
-                    self.add_connection()
+                    self.add_connection(config)
                 elif r < ((add_node + remove_node +
                             add_connection + disable_connection) / div):
                     self.disable_connection()
             else:
                 # mutate each structural category separately
                 if rng() < add_node:
-                    self.add_node()
+                    self.add_node(config)
                 if rng() < remove_node:
-                    self.remove_node()
+                    self.remove_node(config)
                 if rng() < add_connection:
-                    self.add_connection()
+                    self.add_connection(config)
                 if rng() < disable_connection:
                     self.disable_connection()
             
-            self.mutate_activations(mutate_activations)
-            self.mutate_weights(mutate_weights)
-            self.mutate_bias(mutate_bias)
+            self.mutate_activations(mutate_activations, config)
+            self.mutate_weights(mutate_weights, config)
+            self.mutate_bias(mutate_bias, config)
             self.mutate_lr(mutate_sgd_lr_sigma)
             self.update_node_layers()
-            self.disable_invalid_connections()
+            self.disable_invalid_connections(config)
             
             
         self.outputs = None # reset the image
         if hasattr(self, 'aot_fn'):
             del self.aot_fn # needs recompile
 
-    def disable_invalid_connections(self):
+    def disable_invalid_connections(self, config):
         """Disables connections that are not compatible with the current configuration."""
         # return # TODO: test, but there should never be invalid connections
         invalid = []
         for key, connection in self.connection_genome.items():
             if connection.enabled:
-                if not is_valid_connection(self.node_genome, self.connection_genome, connection.key, self.config, warn=True):
+                if not is_valid_connection(self.node_genome, self.connection_genome, connection.key, config, warn=True):
                     invalid.append(key)
         for key in invalid:
             del self.connection_genome[key]
 
-    def add_connection(self):
+    def add_connection(self, config):
         """Adds a connection to the CPPN."""
-        assert self.config is not None, "Config is None."
         self.update_node_layers()
         
         for _ in range(20):  # try 20 times max
-            [from_node, to_node] = random_choice(self.generator, 
-                list(self.node_genome.values()), 2, replace=False)
-
+            [from_node, to_node] = random_choice(list(self.node_genome.values()),
+                                                 2, replace=False)
+            if from_node.layer >= to_node.layer:
+                continue  # don't allow recurrent connections
             # look to see if this connection already exists
             existing_cx = self.connection_genome.get((from_node.id, to_node.id))
 
             # if it does exist and it is disabled, there is a chance to reenable
             if existing_cx is not None:
                 if not existing_cx.enabled:
-                    if random_uniform(self.generator) < self.config.prob_reenable_connection:
+                    if torch.rand(1)[0] < config.prob_reenable_connection:
                         existing_cx.enabled = True # re-enable the connection
                     break  # don't enable more than one connection
                 continue # don't add more than one connection
 
             # else if it doesn't exist, check if it is valid
-            if is_valid_connection(self.node_genome,  self.connection_genome, (from_node.id, to_node.id), self.config):
+            if is_valid_connection(self.node_genome,  self.connection_genome, (from_node.id, to_node.id), config):
                 # valid connection, add
                 new_cx = Connection((from_node.id, to_node.id), self.random_weight())
                 assert new_cx.key not in self.connection_genome.keys(),\
@@ -664,7 +582,7 @@ class CPPN():
             # else failed to find a valid connection, don't add and try again
         self.outputs = None # reset the image
 
-    def add_node(self):
+    def add_node(self, config):
         """Adds a node to the CPPN.
             Looks for an eligible connection to split, add the node in the middle
             of the connection.
@@ -677,30 +595,25 @@ class CPPN():
             return # there are no eligible connections, don't add a node
 
         # choose a random eligible connection
-        old_connection = random_choice(self.generator, eligible_cxs,1,replace=False)[0]
+        old_connection = random_choice(eligible_cxs, 1, replace=False)
 
         # create the new node
-        new_node = Node(self.get_new_node_id(), choose_random_function(self.generator, self.config),
-                        NodeType.HIDDEN, 999, self.config.node_agg, device=self.device, grad=self.config.with_grad)
+        new_node = Node(self.get_new_node_id(), random_choice(config.activations),
+                        NodeType.HIDDEN, 999, config.node_agg, device=self.device, grad=False)
         
         assert new_node.id not in self.node_genome.keys(),\
             "Node ID already exists: {}".format(new_node.id)
             
         self.node_genome[new_node.id] =  new_node # add a new node between two nodes
 
-        # disable old connection
-        old_connection.enabled = False
+        old_connection.enabled = False  # disable old connection
 
         # The connection between the first node in the chain and the
         # new node is given a weight of one and the connection between
         # the new node and the last node in the chain
         # is given the same weight as the connection being split
-        dtype = self.config.dtype
-        if isinstance(dtype, str):
-            dtype = getattr(torch, dtype.replace("torch.", ""))
-
         new_cx_1 = Connection(
-            (old_connection.key[0], new_node.id), torch.tensor(1.0, device=self.device,dtype=dtype, requires_grad=self.config.with_grad))
+            (old_connection.key[0], new_node.id), torch.tensor(1.0, device=self.device, dtype=dtype, requires_grad=False))
         assert new_cx_1.key not in self.connection_genome.keys()
         self.connection_genome[new_cx_1.key] = new_cx_1
 
@@ -712,7 +625,7 @@ class CPPN():
         self.update_node_layers() # update the layers of the nodes
         self.outputs = None # reset the image
         
-    def remove_node(self):
+    def remove_node(self, config):
         """Removes a node from the CPPN.
             Only hidden nodes are eligible to be removed.
         """
@@ -722,7 +635,7 @@ class CPPN():
             return # no eligible nodes, don't remove a node
 
         # choose a random node
-        node_id_to_remove = random_choice(self.generator, [n.id for n in hidden], 1, False)[0]
+        node_id_to_remove = random_choice([n.id for n in hidden], 1, False)
 
         for key, cx in list(self.connection_genome.items())[::-1]:
             if node_id_to_remove in cx.key:
@@ -733,16 +646,16 @@ class CPPN():
                 break
 
         self.update_node_layers()
-        self.disable_invalid_connections()
+        self.disable_invalid_connections(config)
         self.outputs = None # reset the image
 
-    def prune(self):
+    def prune(self, config):
         removed = 0
         for cx in list(self.connection_genome.values())[::-1]:
-            if abs(cx.weight)< self.config.prune_threshold:
+            if abs(cx.weight)< config.prune_threshold:
                 del self.connection_genome[cx.key]
                 removed += 1
-        for _ in range(self.config.min_pruned - removed):
+        for _ in range(config.min_pruned - removed):
             min_weight_key = min(self.connection_genome, key=lambda k: self.connection_genome[k].weight)
             removed += 1
             del self.connection_genome[min_weight_key]
@@ -759,7 +672,7 @@ class CPPN():
         # print("Pruned {} connections".format(removed))
         
         self.update_node_layers()
-        self.disable_invalid_connections()
+        self.disable_invalid_connections(config)
         self.outputs = None # reset the image
 
     
@@ -768,7 +681,7 @@ class CPPN():
         eligible_cxs = list(self.enabled_connections())
         if len(eligible_cxs) < 1:
             return
-        cx = random_choice(self.generator, eligible_cxs, 1, False)[0]
+        cx = random_choice(eligible_cxs, 1, False)
         cx.enabled = False
         self.outputs = None # reset the image
 
@@ -786,35 +699,7 @@ class CPPN():
             
         # for _, node in self.output_nodes().items():
         #     node.layer = max_layer + 1
-            
-    def input_nodes(self) -> dict:
-        """Returns a dict of all input nodes."""
-        return {n.id: n for n in self.node_genome.values() if n.type == NodeType.INPUT}
-
-    def output_nodes(self) -> dict:
-        """Returns a dict of all output nodes."""
-        return {n.id: n for n in self.node_genome.values() if n.type == NodeType.OUTPUT}
-
-    def hidden_nodes(self) -> dict:
-        """Returns a dict of all hidden nodes."""
-        return {n.id: n for n in self.node_genome.values() if n.type == NodeType.HIDDEN}
-
-    def set_inputs(self, inputs):
-        """Sets the input neurons outputs to the input values."""
-        assert self.config is not None, "Config is None."
-        if self.config.use_radial_distance:
-            # d = sqrt(x^2 + y^2)
-            inputs.append(torch.sqrt(inputs[0]**2 + inputs[1]**2))
-        if self.config.use_input_bias:
-            inputs.append(torch.tensor(1.0,device=self.device))  # bias = 1.0
-            
-        assert len(inputs) == len(self.input_nodes()), f"Wrong number of inputs {len(inputs)} != {len(self.input_nodes())}"
-        
-        for inp, node in zip(inputs, self.input_nodes().values()):
-            # inputs are first N nodes
-            node.sum_inputs = inp
-            node.outputs = node.activation(inp)
-            assert torch.isfinite(node.outputs).all()
+         
 
     def get_layer(self, layer_index):
         """Returns a list of nodes in the given layer."""
@@ -831,19 +716,18 @@ class CPPN():
             layers[node.layer].append(node)
         return layers
 
-    def clamp_weights(self):
+    def clamp_weights(self, config):
         """Clamps all weights to the range [-max_weight, max_weight]."""
-        assert self.config is not None, "Config is None."
-        if not self.config.get("clamp_weights", True):
+        if not config.get("clamp_weights", True):
             return
             
         for _, cx in self.connection_genome.items():
-            if cx.weight < self.config.weight_threshold and cx.weight >\
-                 -self.config.weight_threshold:
+            if cx.weight < config.weight_threshold and cx.weight >\
+                 -config.weight_threshold:
                 cx.weight = torch.tensor(0.0, device=self.device, requires_grad=cx.weight.requires_grad)
             if not isinstance(cx.weight, torch.Tensor):
                 cx.weight = torch.tensor(cx.weight, device=self.device, requires_grad=cx.weight.requires_grad)
-            cx.weight = torch.clamp(cx.weight, min=-self.config.max_weight, max=self.config.max_weight)
+            cx.weight = torch.clamp(cx.weight, min=-config.max_weight, max=config.max_weight)
             
     def clear_data(self):
         """Clears the data from the network."""
@@ -852,70 +736,31 @@ class CPPN():
             node.sum_inputs = None
             node.outputs = None
         
-        if self.config.with_grad:
-            for connection in self.connection_genome.values():
-                connection.weight.grad = None
+        for connection in self.connection_genome.values():
+            connection.weight.grad = None
     
-    def reset_activations(self, parallel=True):
+    def reset_activations(self, shape):
         """Resets all node activations to zero."""
-        assert self.config is not None, "Config is None."
-        h,w = self.config.res_h, self.config.res_w
-        h,w = h//2**self.config.num_upsamples, w//2**self.config.num_upsamples
-        if parallel:
-            for _, node in self.node_genome.items():
-                node.sum_inputs = torch.zeros((1, h, w), device=self.device)
-                node.outputs = torch.zeros((1, h, w), device=self.device)
-        else:
-            for _, node in self.node_genome.items():
-                node.sum_inputs = torch.zeros(1, device=self.device)
-                node.outputs = torch.zeros(1, device=self.device)
-                
-    def eval(self, inputs):
-        """Evaluates the CPPN."""
-        raise NotImplementedError("Use forward() instead.")
+        for _, node in self.node_genome.items():
+            node.sum_inputs = torch.zeros(shape, device=self.device)
+            node.outputs = torch.zeros(shape, device=self.device)
 
-    def forward_(self, inputs=None, extra_inputs=None, channel_first=True, override_activation_mode=None):
-        # TODO: channel_first is ignored for now
-
-        assert self.config is not None, "Config is None."
-        act_mode = self.config.activation_mode
-        if override_activation_mode is not None:
-            act_mode = override_activation_mode
+ 
+    def forward(self, inputs=None, channel_first=True, act_mode='node'):
+        res_h, res_w = inputs.shape[0], inputs.shape[1]
+        node_shape = (res_h, res_w)
         
-        batch_size = 1 if extra_inputs is None else extra_inputs.shape[0]
-        res_h, res_w = self.config.res_h, self.config.res_w
-        res_h, res_w = res_h//2**self.config.num_upsamples, res_w//2**self.config.num_upsamples
-        
-        assert isinstance(batch_size, int), "Batch size must be an integer."
-        assert isinstance(res_h, int), "Res h must be an integer."
-        assert isinstance(res_w, int), "Res w must be an integer."
-        
-        if inputs is None:
-            if type(self).constant_inputs is None:
-                self.initialize_inputs_from_config(self.config)
-            inputs = type(self).constant_inputs
-        
-        if self.device!=inputs.device:
+        if str(self.device)!=str(inputs.device):
             logging.warning(f"Moving CPPN to inputs device: {inputs.device}")
             self.to(inputs.device) # breaks computation graph
             
-        for p_layer in self.pre_layers:
-            inputs = inputs.permute(2,0,1)
-            inputs = p_layer(inputs)
-            inputs = torch.relu(inputs)
-            inputs = inputs.permute(1, 2, 0)
-
         # reset the activations to 0 before evaluating
-        self.reset_activations()
+        self.reset_activations(node_shape)
         
         # get layers
         layers = feed_forward_layers(self) 
         layers.insert(0, self.input_nodes().keys()) # add input nodes as first layer
-        
-        dtype = self.config.dtype
-        if isinstance(dtype, str):
-            dtype = getattr(torch, dtype.replace("torch.", ""))
-        
+
         # iterate over layers
         for layer in layers:
             Xs, Ws, nodes, Fns = [], [], [], []
@@ -925,28 +770,28 @@ class CPPN():
                 
                 if node.type == NodeType.INPUT:
                     # initialize the node's sum
-                    X = inputs[:,:,node_index].repeat(batch_size, 1, 1, 1) # (batch_size, cx, res_h, res_w)
+                    X = inputs[:,:,node_index].unsqueeze(-1)
                     weights = torch.ones((1), dtype=dtype, device=self.device)
                 else:
                     # find incoming connections and activate
                     X, weights = get_incoming_connections_weights(self, node)
-                    # X shape = (batch_size, num_incoming, res_h, res_w)
+                    # X shape = (num_incoming, res_h, res_w)
                     if X is None:
-                        X = torch.zeros((batch_size, 1, res_h, res_w), dtype=dtype, device=self.device)
+                        X = torch.zeros((res_h, res_w), dtype=dtype, device=self.device)
                     if weights is None:
                         weights = torch.ones((1), dtype=dtype, device=self.device)
 
                 if act_mode == 'node':
-                    weights = weights.to(dtype)
                     assert torch.isfinite(X).all()
                     if not torch.isfinite(weights).all():
                         # self.draw_nx(show=True)
                         logging.warning(f"found {torch.tensor(torch.isfinite(weights)==0.0).sum()} non-finite values in node {node.id} weights (out of {weights.numel()}), {weights}")
                     assert torch.isfinite(weights).all(), f"found {torch.tensor(torch.isfinite(weights)==0.0).sum()} non-finite values in node {node.id} weights (out of {weights.numel()}), {weights}"
-                    weights[~torch.isfinite(weights)] = torch.nn.Parameter(torch.tensor(0.0, device=self.device, dtype=dtype))
+                    # weights[~torch.isfinite(weights)] = torch.nn.Parameter(torch.tensor(0.0, device=self.device, dtype=dtype))
+                    
                     node.activate(X, weights) # naive
                     
-                    assert torch.isfinite(node.outputs).all()
+                    assert torch.isfinite(node.outputs).all(), f"Node {node.id} with activation {node.activation} and inputs {X}, weights {weights} has non-finite output {node.outputs}"
                 elif act_mode == 'layer':
                     # group by function for efficiency
                     Xs.append(X)
@@ -959,71 +804,38 @@ class CPPN():
                     raise ValueError(f"Unknown activation mode {act_mode}")
                 
             if act_mode == 'layer':
-                activate_layer(Xs, Ws, {n.id:n for n in nodes}, self.config.node_agg)
+                node_agg = nodes[0].agg
+                activate_layer(Xs, Ws, {n.id:n for n in nodes}, node_agg)
             
         # collect outputs from the last layer
         sorted_o = sorted(self.output_nodes().values(), key=lambda x: x.key, reverse=True)
-        outputs = torch.stack([node.outputs for node in sorted_o], dim=1)
+        outputs = torch.stack([node.outputs for node in sorted_o], dim=0 if channel_first else -1)
         assert str(outputs.device) == str(self.device), f"Output is on {outputs.device}, should be {self.device}"
 
         self.outputs = outputs
-        for layer in self.post_layers:
-            if isinstance(layer, torch.nn.Linear):
-                self.outputs = self.outputs.reshape(self.outputs.shape[0], -1)
-            self.outputs = layer(self.outputs)
-            # self.outputs = torch.relu(self.outputs)
-            if isinstance(layer, torch.nn.Linear):
-                self.outputs = self.outputs.reshape(self.outputs.shape[0], len(self.config.color_mode), self.config.res_h, self.config.res_w)
                 
-        if self.config.output_blur > 0:
-            self.outputs = gaussian_blur(self.outputs, self.config.output_blur)
-        
+        if self.output_blur > 0:
+            self.outputs = gaussian_blur(self.outputs, self.output_blur)
                 
         assert str(self.outputs.device )== str(self.device), f"Output is on {self.outputs.device}, should be {self.device}"
         assert self.outputs.dtype == torch.float32, f"Output is {self.outputs.dtype}, should be float32"
-        if batch_size == 1:
-            self.outputs  = self.outputs.squeeze(0) # remove batch dimension if batch size is 1
-            # reshape the outputs to image shape
-            if not len(self.config.color_mode)>2:
-                self.outputs  = torch.reshape(self.outputs, (res_h, res_w))
+    
+        # reshape the outputs to image shape
+        # if not len(self.color_mode)>2:
+            # self.outputs  = torch.reshape(self.outputs, (res_h, res_w))
         
         return self.outputs
     
-    
-    def forward(self, inputs=None, extra_inputs=None, no_aot=True, channel_first=True, override_activation_mode=None):
-        """Feeds forward the network. A wrapper for forward_() that allows for AOT compilation."""
-        
-        assert self.config is not None, "Config is None."
-        if self.config.with_grad and not no_aot:
-            if not hasattr(self, 'aot_fn'):
-                def f(x0, x1):
-                    return self.forward_(inputs=x0, extra_inputs=x1, channel_first=channel_first, override_activation_mode=override_activation_mode) 
-                def fw(f, inps):
-                    return f
-                def bw(f, inps):
-                    return f
-                
-                self.aot_fn = torch.compile(f)
-            
-            return self.aot_fn(inputs, extra_inputs)  
-        else:  
-            return self.forward_(inputs=inputs, extra_inputs=extra_inputs, channel_first=channel_first, override_activation_mode=override_activation_mode)
 
     def backward(self, loss:torch.Tensor,retain_graph=False):
         """Backpropagates the error through the network."""
-        assert self.config is not None
-        assert self.config.with_grad, "Cannot backpropagate without gradients. Set config.with_grad=True."
         self.optimizer.zero_grad()
         loss.backward(retain_graph=retain_graph)
         self.optimizer.step()
         self.outputs = None # new image
     
+    
     def discard_grads(self):
-        
-        dtype = self.config.dtype
-        if isinstance(dtype, str):
-            dtype = getattr(torch, dtype.replace('torch.', ''))
-        
         for _, cx in self.connection_genome.items():
             # check nan
             if isinstance(cx.weight, float):
@@ -1037,75 +849,16 @@ class CPPN():
             if isinstance(node.bias, float):
                 node.bias = torch.tensor(node.bias, device=self.device, dtype=dtype)
             node.bias = torch.tensor(node.bias.detach().item(), device=self.device, dtype=dtype)
-        self.reset_activations()
+        # self.reset_activations()
+        for _, node in self.node_genome.items():
+            node.sum_inputs = None
+            node.outputs = None
+        
         self.outputs = None # new image
-        self.fitness= torch.tensor(self.fitness.detach().item(), device=self.device)
+
         if hasattr(self, 'optimizer'):
             del self.optimizer
             self.optimizer = None
-        if hasattr(self, 'aot_fn'):
-            del self.aot_fn
-        
-    
-    def genetic_difference(self, other) -> float:
-        # only enabled connections, sorted by innovation id
-        this_cxs = sorted(self.enabled_connections(),
-                          key=lambda c: c.key)
-        other_cxs = sorted(other.enabled_connections(),
-                           key=lambda c: c.key)
-
-        N = max(len(this_cxs), len(other_cxs))
-        other_innovation = [c.key for c in other_cxs]
-
-        # number of excess connections
-        n_excess = len(get_excess_connections(this_cxs, other_innovation))
-        # number of disjoint connections
-        n_disjoint = len(get_disjoint_connections(this_cxs, other_innovation))
-
-        # matching connections
-        this_matching, other_matching = get_matching_connections(
-            this_cxs, other_cxs)
-        
-        difference_of_matching_weights = [
-            abs(o_cx.weight.item()-t_cx.weight.item()) for o_cx, t_cx in zip(other_matching, this_matching)]
-        # difference_of_matching_weights = torch.stack(difference_of_matching_weights)
-        
-        if(len(difference_of_matching_weights) == 0):
-            difference_of_matching_weights = 0
-        else:
-            difference_of_matching_weights = sum(difference_of_matching_weights) / len(difference_of_matching_weights)
-
-        # Furthermore, the compatibility distance function
-        # includes an additional argument that counts how many
-        # activation functions differ between the two individuals
-        n_different_fns = 0
-        for t_node, o_node in zip(self.node_genome.values(), other.node_genome.values()):
-            if(t_node.activation.__name__ != o_node.activation.__name__):
-                n_different_fns += 1
-
-        # can normalize by size of network (from Ken's paper)
-        if(N > 0):
-            n_excess /= N
-            n_disjoint /= N
-
-        # weight (values from Ken)
-        n_excess *= 1
-        n_disjoint *= 1
-        difference_of_matching_weights *= .4
-        n_different_fns *= 1
-        
-        difference = sum([n_excess,
-                          n_disjoint,
-                          difference_of_matching_weights,
-                          n_different_fns])
-        if torch.isnan(torch.tensor(difference)):
-            difference = 0
-
-        return difference
-
-    def species_comparision(self, other, threshold) -> bool:
-        # returns whether other is the same species as self
-        return self.genetic_difference(other) < threshold
 
 
     def crossover(self, other):
@@ -1113,7 +866,7 @@ class CPPN():
         
         # TODO: this may mess up the order of the outputs, need to check
         
-        child = CPPN(self.config, {}, {}) # create an empty child genome
+        child = type(self)(self.config, {}, {}) # create an empty child genome
         assert self.fitness is not None, "Parent 1 has no fitness"
         assert other.fitness is not None, "Parent 2 has no fitness"
         # determine which parent is more fit
@@ -1123,7 +876,7 @@ class CPPN():
             parent1, parent2 = other, self
         else:
             # fitness same, choose randomly
-            if torch.rand(1,generator=self.generator)[0] < 0.5:
+            if torch.rand(1)[0] < 0.5:
                 parent1, parent2 = self, other
             else:
                 parent1, parent2 = other, self
@@ -1154,332 +907,89 @@ class CPPN():
         
         return child
 
+
     def save(self, path):
         copy = self.clone()
         json_ = copy.to_json()
         assert os.path.exists(path), f"Path {path} does not exist"
         with open(path, 'w') as f:
             json.dump(json_, f, indent=4)
-            
-    def compress(self, path):
-        """Save the genome as a compressed numpy file."""
-        self.cpu()
-        self.discard_grads()
-        weight_arr = np.zeros((len(list(self.enabled_connections()))), dtype=np.float32)
-        id_arr = np.zeros((len(list(self.enabled_connections())), 2), dtype=np.int8)
-        act_arr = np.zeros((len(list(self.enabled_connections())), 2), dtype=np.int8)
-        types_arr = np.zeros((len(list(self.enabled_connections())), 2), dtype=np.int8)
-        lineage_arr = np.zeros(len(self.lineage), dtype=np.int16)
-        if isinstance(self.config.activations[0], str):
-            activation_idx = {act: i for i, act in enumerate(self.config.activations)}
-        else:
-            activation_idx = {act.__name__: i for i, act in enumerate(self.config.activations)}
-        
-        activation_idx['identity'] = -1 # hardcode identity (sometimes used for input nodes)
-            
-        version = np.array(self.config.version, dtype=np.int8)
-        
-        for i, cx in enumerate(self.enabled_connections()):
-            in_node, out_node = cx.key
-            id_arr[i, 0] = in_node
-            id_arr[i, 1] = out_node
-            act_arr[i, 0] = activation_idx[self.node_genome[in_node].activation.__name__]
-            act_arr[i, 1] = activation_idx[self.node_genome[out_node].activation.__name__]
-            types_arr[i, 0] = int(self.node_genome[in_node].type)
-            types_arr[i, 1] = int(self.node_genome[out_node].type)
-            weight_arr[i] = cx.weight
-        
-        lineage_arr[:] = self.lineage
-            
-        if path is not None:
-            with open(path, 'wb') as f:
-                np.savez_compressed(f, version=version, id=self.id, weight_arr=weight_arr, id_arr=id_arr, act_arr=act_arr, types_arr=types_arr, lineage=lineage_arr)
-        else:
-            return version, self.id, weight_arr, id_arr, act_arr, types_arr, lineage_arr
-        
-    def decompress(self, path, dat=None):
-        """Load the genome from a compressed numpy file."""
-        if path is None:
-           version, id, weight_arr, id_arr, act_arr, types_arr, lineage_arr = dat
-        else:
-            assert os.path.exists(path), f"Path {path} does not exist"
-            loaded = np.load(path)
-            version = loaded['version']
-            weight_arr = loaded['weight_arr']
-            id_arr = loaded['id_arr']
-            act_arr = loaded['act_arr']
-            types_arr = loaded['types_arr']
-            lineage_arr = loaded['lineage']
-        
-        self.id = id
-        self.lineage = lineage_arr.tolist()
-        
-        if isinstance(self.config.activations[0], str):
-            idx_activation = {i: af.__dict__[act] for i, act in enumerate(self.config.activations)}
-        else:
-            idx_activation = {i:act for i, act in enumerate(self.config.activations)}
-        idx_activation[-1] = 'identity' # hardcode identity (sometimes used for input nodes)
-        
-        if version.tolist() != self.config.version:
-            logging.warn(f"Version mismatch. Expected {self.config.version}, got {version.tolist()}")
-            logging.warn("Uncompressed file may not be compatible with current configuration.")
-            logging.warn(f"Use CPPN version {version.tolist()} for compatibility.")
-            
-        self.node_genome = {}
-        nodes = []
-        self.connection_genome = {}
-        cx_id = 0
-        for ids, acts, weight in zip(id_arr, act_arr, weight_arr):
-            in_node_id, out_node_id = ids
-            act_in, act_out = acts
-            if in_node_id not in self.node_genome:
-                # node: key, activation=None, _type=2, _layer=999, node_agg="sum", device="cpu", grad=True
-                 self.node_genome[in_node_id] = Node(
-                     key=in_node_id, 
-                     activation=idx_activation[act_in], 
-                     _type=types_arr[cx_id][0], 
-                     node_agg=self.config.node_agg, 
-                     device=self.device, 
-                     grad=self.config.with_grad
-                     )
-            if out_node_id not in self.node_genome:
-                self.node_genome[out_node_id] = Node(
-                    key=out_node_id, 
-                    activation=idx_activation[act_out], 
-                    _type=types_arr[cx_id][1], 
-                    node_agg=self.config.node_agg, 
-                    device=self.device, 
-                    grad=self.config.with_grad
-                    )
-            self.connection_genome[(in_node_id, out_node_id)] = Connection((in_node_id, out_node_id), torch.tensor(weight, dtype=self.config.dtype, device=self.device, requires_grad=self.config.with_grad))
-            cx_id += 1
-            
-        self.reconfig(self.config)
-        
-        self.update_node_layers()
 
-    def clone(self, deepcopy=True, cpu=False, new_id=False):
+
+    def __copy__(self):
+        return self.clone()
+
+
+    def clone(self, config, cpu=False, new_id=False):
         """ Create a copy of this genome. """
-        if hasattr(self, 'aot_fn'):
-            # can't clone AOT functions
-            del self.aot_fn
-
-        if hasattr(self, 'generator') and self.generator is not None:
-            generator_state = self.generator.get_state()
-            del self.generator
-        else:
-            generator_state = torch.Generator(device=self.device).get_state()
-        
-        out_child = None
-        
-        
-        dtype = self.config.dtype
-        if isinstance(dtype, str):
-            dtype = getattr(torch, dtype.replace('torch.', ''))
-        
         id = self.id if (not new_id) else type(self).get_id()
-        if deepcopy:
-            if self.config.with_grad:
-                self.discard_grads()
 
-            child = copy.deepcopy(self)
-            out_child = child
-        else:
-            child = type(self)(self.config, {}, {})
-            child.connection_genome = {key: cx.copy() for key, cx in self.connection_genome.items()}        
-            child.node_genome = {key: node.copy() for key, node in self.node_genome.items()}
-            child.update_node_layers()
-            for cx in child.connection_genome.values():
-                cx.weight = cx.weight.detach()
-                cx.weight = torch.tensor(cx.weight.item(), dtype=dtype) # require prepare_optimizer() again
-
-            out_child = child
+        child = type(self)(config, {}, {})
+        child.connection_genome = {key: cx.copy() for key, cx in self.connection_genome.items()}        
+        child.node_genome = {key: node.copy() for key, node in self.node_genome.items()}
         
-        self.generator = torch.Generator(device=self.device)
-        try:
-            self.generator.set_state(generator_state)
-        except RuntimeError:
-            ...
-
-        out_child.set_id(id)
-        out_child.age = 0
+        for n in child.node_genome.values():
+            n.bias = torch.tensor(n.bias.item(), dtype=dtype, device=child.device)
+        
+        child.update_node_layers()
+        for cx in child.connection_genome.values():
+            cx.weight = torch.tensor(cx.weight.item(), dtype=dtype, device=self.device) # require prepare_optimizer() again
+        
+        if new_id:
+            child.parents = (self.id, self.id)
+            child.lineage = self.lineage + [self.id]
+        else:
+            child.parents = self.parents
+            child.lineage = self.lineage
+            
+        
+        child.set_id(id)
+        child.age = 0
         
         if cpu:
-            out_child.cpu()
-
-        out_child.configure_generator()
-
-        for n in self.node_genome.values():
-            n.bias = torch.tensor(n.bias.item(), dtype=dtype, device=self.device)
-        for n in out_child.node_genome.values():
-            n.bias = torch.tensor(n.bias.item(), dtype=dtype, device=out_child.device)
-        return out_child
-    
-    
-
-    def layer_to_str(self, layer, i):
-        if isinstance(layer, Conv2d):
-            return f'CONV {i}\n{layer.kernel_size}x{layer.in_channels}'
-        elif isinstance(layer, torch.nn.MaxPool2d):
-            return f'POOL {i}\n{layer.kernel_size}x{layer.in_channels}'
-        elif isinstance(layer, torch.nn.MultiheadAttention):
-            return f'ATTN {i}\n{layer.num_heads} heads'
-        elif isinstance(layer, torch.nn.Sequential) and isinstance(layer[0], torch.nn.Upsample):
-            return f'UPSAMPLE {i}\nX{layer[0].scale_factor}'
-        elif isinstance(layer, torch.nn.Upsample):
-            return f'UPSAMPLE {i}\nX{layer.scale_factor}'
-        elif isinstance(layer, torch.nn.Flatten):
-            return f'FLATTEN {i}'
-        elif isinstance(layer, torch.nn.Unflatten):
-            return f'UNFLATTEN {i}'
-        elif isinstance(layer, torch.nn.Linear):
-            return f'LINEAR {i}'
-        elif isinstance(layer, Block):
-            return f'RESNET BLOCK {i}'
-
-    def to_nx(self, only_enabled=True):
-        import networkx as nx
-        G = nx.DiGraph()
-        self.update_node_layers()
-        for i, layer in enumerate(self.pre_layers):
-            G.add_node(self.layer_to_str(layer, i))
-         
-        for i, layer in enumerate(self.post_layers):
-            G.add_node(self.layer_to_str(layer, i))
-            
-        for i, layer in enumerate(self.pre_layers[:-1]):
-            G.add_edge(self.layer_to_str(layer, i), self.layer_to_str(self.pre_layers[i+1], i+1))
-            
-        for i, layer in enumerate(self.post_layers[:-1]):
-            G.add_edge(self.layer_to_str(layer, i), self.layer_to_str(self.post_layers[i+1], i+1))
-        
-        if only_enabled:
-            used_nodes = set()
-            for key, cx in self.connection_genome.items():
-                if cx.enabled:
-                    G.add_edge(key[0], key[1], weight=cx.weight.item())
-                    used_nodes.add(key[0])
-                    used_nodes.add(key[1])
-                    
-            for key, node in self.node_genome.items():
-                if key in used_nodes:
-                    G.add_node(key, activation=node.activation.__name__)
+            child.to('cpu')
         else:
-            for n in self.node_genome.values():
-                G.add_node(n.key, type=n.type.name, fn=n.activation)
-            for c in self.connection_genome.values():
-                if c.enabled:
-                    G.add_edge(c.key[0], c.key[1], weight=c.weight.item())
-                
-        if len(self.pre_layers) > 0:
-            last_layer = self.pre_layers[-1]
-            last_layer_i = len(self.pre_layers)-1
-            for n in self.input_nodes().values():
-                G.add_edge(self.layer_to_str(last_layer, last_layer_i), n.key)
-                
-        if len(self.post_layers) > 0:
-            first_layer = self.post_layers[0]
-            first_layer_i = 0
-            for n in self.output_nodes().values():
-                G.add_edge(n.key, self.layer_to_str(first_layer, first_layer_i))
-        return G
+            child.to(self.device)
+
+        
+        return child
     
-    
-    def to_networkx(self):
-        self.update_node_layers()
-        G = nx.DiGraph()
-        used_nodes = set()
-        for key, cx in self.connection_genome.items():
-            if cx.enabled:
-                G.add_edge(key[0], key[1], weight=cx.weight.item())
-                used_nodes.add(key[0])
-                used_nodes.add(key[1])
-                
-        for key, node in self.node_genome.items():
-            if key in used_nodes:
-                G.add_node(key, activation=node.activation.__name__)
-        
-        return G
-
-    def draw_nx(self, size=(10,20), show=True):
-        import matplotlib.pyplot as plt
-        import networkx as nx
-        from networkx.drawing.nx_agraph import graphviz_layout
-        fig = plt.figure(figsize=size)
-        G = self.to_nx()
-        args = "-Grankdir=LR"
-
-        pos = graphviz_layout(G, prog='dot', args=args)
-        
-        
-        
-        nx.draw_networkx(
-            G,
-            with_labels=True,
-            pos=pos,
-            labels={n:f"{self.node_genome[n].layer}.{n}\n{self.node_genome[n].activation.__name__[:4]}\n"#{1}xHxW"
-                    if n in self.node_genome else n
-                    for n in G.nodes(data=False) },
-            node_size=800,
-            font_size=6,
-            node_shape='s',
-            node_color=['lightsteelblue' if n in self.node_genome else 'lightgreen' for n in G.nodes()  ]
-            )
-        plt.annotate('# params: ' + str(self.num_params), xy=(1.0, 1.0), xycoords='axes fraction', fontsize=12, ha='right', va='top')
-        
-        plt.tight_layout()
-        plt.axis('off')
-        if show:
-            plt.show()
-
-
     def to(self, device):
+        """Moves the CPPN to the given device (in-place)."""
+        if isinstance(device, str):
+            device = torch.device(device)
+        # if self.device == device:
+            # return
         self.device = device
-        for pre in self.pre_layers:
-            pre.to(device)
-        for post in self.post_layers:
-            post.to(device)
         for key, node in self.node_genome.items():
             node.to(device)
         for key, cx in self.connection_genome.items():
             cx.to(device)
                 
-    def cpu(self):
-        '''Move all tensors to CPU'''
-        if self.device == torch.device('cpu'):
-            return
-        self.device = torch.device('cpu')
-        for key, node in self.node_genome.items():
-            node.to_cpu()
-        for key, cx in self.connection_genome.items():
-            cx.to_cpu()
-        self.fitness = self.fitness.cpu()
-        if self.outputs is not None:
-            self.outputs = self.outputs.cpu()
-        self.adjusted_fitness = self.adjusted_fitness.cpu()
-        self.novelty = self.novelty.cpu()
 
-        for layer in self.pre_layers:
-            layer.cpu()
-        for layer in self.post_layers:
-            layer.cpu()
+    def __call__(self, *args, **kwargs):
+        # wrapper for forward
+        return self.forward(*args, **kwargs)
+    
 
-    def cuda(self, device='cuda:0'):
-        '''Move all tensors to CUDA'''
-        if self.device == torch.device(device):
-            return
-        self.device = torch.device(device)
-        for key, node in self.node_genome.items():
-            node.to_cuda(device)
-        for key, cx in self.connection_genome.items():
-            cx.to_cuda(device)
-        self.fitness = self.fitness.cuda(device)
-        if self.outputs is not None:
-            self.outputs = self.outputs.cuda(device)
-        self.adjusted_fitness = self.adjusted_fitness.cuda(device)
-        self.novelty = self.novelty.cuda(device)
-        
-        for layer in self.pre_layers:
-            layer.cuda(device)
-        for layer in self.post_layers:
-            layer.cuda(device)
+if __name__== "__main__":
+    from config import CPPNConfig
+    c = CPPNConfig()
+    c.device = torch.device('cuda:0')
+    c.color_mode = 'L'
+    cppn = CPPN(c)
+    for _ in range(100):
+        cppn.mutate(c)
+    inputs = CPPN.initialize_inputs_from_config(c)
+    outputs = cppn(inputs, channel_first=False)
+    
+    from util import visualize_network
+    
+    import matplotlib.pyplot as plt
+    visualize_network(cppn, c)
+    plt.show()
+    
+    
+    
+    plt.imshow(outputs.detach().cpu().numpy(), cmap='gray')
+    plt.show()

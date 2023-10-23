@@ -17,8 +17,8 @@ from cppn_torch.normalization import handle_normalization
    
 from torchvision.transforms import GaussianBlur
    
-def visualize_network(individual, sample_point=None, color_mode="L", visualize_disabled=False, layout='multi', sample=False, show_weights=False, use_inp_bias=False, use_radial_distance=True, save_name=None, extra_text=None, curved=False, return_fig=False):
-    c = individual.config
+def visualize_network(individual, config, sample_point=None, color_mode="L", visualize_disabled=False, layout='multi', sample=False, show_weights=False, use_inp_bias=False, use_radial_distance=True, save_name=None, extra_text=None, curved=False, return_fig=False):
+    c = config
     if(sample):
         if sample_point is None:
             sample_point = [.25]*c.num_inputs
@@ -43,6 +43,8 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
     plt.subplots_adjust(left=0, bottom=0, right=1.25, top=1.25, wspace=0, hspace=0)
 
     for i, fn in enumerate([node.activation for node in individual.node_genome.values()]):
+        if isinstance(fn, nn.Conv2d):
+            fn.__name__ = "Conv2d"
         function_colors[fn.__name__] = colors[i]
     function_colors["identity"] = colors[0]
 
@@ -141,6 +143,7 @@ def visualize_network(individual, sample_point=None, color_mode="L", visualize_d
     else:
         plt.show()
 
+
 def print_net(individual, show_weights=False, visualize_disabled=False):
     print(f"<CPPN {individual.id}")
     print(f"nodes:")
@@ -150,6 +153,7 @@ def print_net(individual, show_weights=False, visualize_disabled=False):
     for k, v in individual.connection_genome.items():
         print("\t",k, "\t|\t",v.enabled, "\t|\t",v.weight)
     print(">")
+  
   
 def get_network_images(networks):
     imgs = []
@@ -163,6 +167,7 @@ def get_network_images(networks):
         imgs.append(img)  
     return imgs
 
+
 def get_max_number_of_hidden_nodes(population):
     max = 0
     for g in population:
@@ -173,7 +178,7 @@ def get_max_number_of_hidden_nodes(population):
 def get_avg_number_of_hidden_nodes(population):
     count = 0
     for g in population:
-        count+=len(g.node_genome) - g.config.num_inputs - g.n_outputs
+        count+=len(g.node_genome) - g.n_in_nodes - g.n_outputs
     return count/len(population)
 
 def get_max_number_of_connections(population):
@@ -209,7 +214,7 @@ def upscale_conv2d(in_channels, out_channels, kernel_size, stride, padding, bias
    )
     return layer
 
-def show_inputs(inputs, cols=8):
+def show_inputs(inputs, cols=8, cmap='viridis'):
     if not isinstance(inputs, torch.Tensor):
         # assume it's an algorithm instance
         inputs = inputs.inputs
@@ -221,7 +226,7 @@ def show_inputs(inputs, cols=8):
     image_grid(inputs,
                cols=cols,
                show=True,
-               cmap='viridis',
+               cmap=cmap,
                suptitle="Inputs")
 
 
@@ -438,16 +443,99 @@ def center_crop(img, r, c):
     return img[r1:r1 + r, c1:c1 + c]
 
 def random_uniform(generator, low=0.0, high=1.0, grad=False):
-    return ((low - high) * torch.rand(1, device=generator.device, requires_grad=grad, generator=generator) + high)[0]
-def random_normal (generator, mean=0.0, std=1.0, grad=False):
-    return torch.randn(1, device=generator.device, requires_grad=grad, generator=generator)[0] * std + mean
+    if generator:
+        return ((low - high) * torch.rand(1, device=generator.device, requires_grad=grad, generator=generator) + high)[0]
+    else:
+        return ((low - high) * torch.rand(1, requires_grad=grad) + high)[0]
+    
+def random_normal (generator=None, mean=0.0, std=1.0, grad=False):
+    if generator:
+        return torch.randn(1, device=generator.device, requires_grad=grad, generator=generator)[0] * std + mean
+    else:
+        return torch.randn(1, requires_grad=grad)[0] * std + mean
 
-def random_choice(generator, choices, count, replace):
+# def random_choice(generator, choices, count, replace):
+#     if not replace:
+#         # if generator:
+#             # indxs = torch.randperm(len(choices), generator=generator)[:count]
+#         # else:
+#         indxs = torch.randperm(len(choices))[:count]
+#         output = []
+#         for i in indxs:
+#             output.append(choices[i])
+#         return output
+#     else:
+#         if generator:
+#             return choices[torch.randint(len(choices), (count,), generator=generator)]
+#         else:
+#             return choices[torch.randint(len(choices), (count,))]
+        
+def random_choice(options, count=1, replace=False):
+    """Chooses a random option from a list of options"""
     if not replace:
-        indxs = torch.randperm(len(choices))[:count]
+        indxs = torch.randperm(len(options))[:count]
         output = []
         for i in indxs:
-            output.append(choices[i])
+            output.append(options[i])
+        if count == 1:
+            return output[0]
         return output
     else:
-        return choices[torch.randint(len(choices), (count,), generator=generator)]
+        return options[torch.randint(len(options), (count,))]
+    
+
+def genetic_difference(cppn, other) -> float:
+    # only enabled connections, sorted by innovation id
+    this_cxs = sorted(cppn.enabled_connections(),
+                        key=lambda c: c.key)
+    other_cxs = sorted(other.enabled_connections(),
+                        key=lambda c: c.key)
+
+    N = max(len(this_cxs), len(other_cxs))
+    other_innovation = [c.key for c in other_cxs]
+
+    # number of excess connections
+    n_excess = len(get_excess_connections(this_cxs, other_innovation))
+    # number of disjoint connections
+    n_disjoint = len(get_disjoint_connections(this_cxs, other_innovation))
+
+    # matching connections
+    this_matching, other_matching = get_matching_connections(
+        this_cxs, other_cxs)
+    
+    difference_of_matching_weights = [
+        abs(o_cx.weight.item()-t_cx.weight.item()) for o_cx, t_cx in zip(other_matching, this_matching)]
+    # difference_of_matching_weights = torch.stack(difference_of_matching_weights)
+    
+    if(len(difference_of_matching_weights) == 0):
+        difference_of_matching_weights = 0
+    else:
+        difference_of_matching_weights = sum(difference_of_matching_weights) / len(difference_of_matching_weights)
+
+    # Furthermore, the compatibility distance function
+    # includes an additional argument that counts how many
+    # activation functions differ between the two individuals
+    n_different_fns = 0
+    for t_node, o_node in zip(cppn.node_genome.values(), other.node_genome.values()):
+        if(t_node.activation.__name__ != o_node.activation.__name__):
+            n_different_fns += 1
+
+    # can normalize by size of network (from Ken's paper)
+    if(N > 0):
+        n_excess /= N
+        n_disjoint /= N
+
+    # weight (values from Ken)
+    n_excess *= 1
+    n_disjoint *= 1
+    difference_of_matching_weights *= .4
+    n_different_fns *= 1
+    
+    difference = sum([n_excess,
+                        n_disjoint,
+                        difference_of_matching_weights,
+                        n_different_fns])
+    if torch.isnan(torch.tensor(difference)):
+        difference = 0
+
+    return difference
