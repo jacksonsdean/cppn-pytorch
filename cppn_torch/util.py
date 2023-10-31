@@ -69,8 +69,8 @@ def visualize_network(individual, config, sample_point=None, color_mode="L", vis
 
     for i, node in enumerate(nodes.values()):
         if node.type == NodeType.OUTPUT:
-            if not visualize_disabled and node.layer == 999:
-                continue
+            # if not visualize_disabled and node.layer == 999:
+                # continue
             title = i
             G.add_node(node, color=function_colors[node.activation.__name__], shape='s', layer=(node.layer))
             node_labels[node] = f"{node.id}\noutput{title}:\n{node.activation.__name__}"

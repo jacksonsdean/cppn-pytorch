@@ -29,7 +29,7 @@ class ImageCPPN(CPPN):
     def image(self):
         return self.outputs
    
-    def get_image(self, inputs=None, force_recalculate=False, channel_first=True, act_mode='node'):
+    def get_image(self, inputs=None, force_recalculate=False, channel_first=True, act_mode='node', use_graph=False):
         """Returns an image of the network.
             Extra inputs are (batch_size, num_extra_inputs)
         """
@@ -62,7 +62,7 @@ class ImageCPPN(CPPN):
             
             return self.outputs
 
-        self.outputs = self.forward(inputs=inputs, channel_first=channel_first, act_mode=act_mode)
+        self.outputs = self.forward(inputs=inputs, channel_first=channel_first, act_mode=act_mode, use_graph=use_graph)
        
         assert self.outputs.dtype == torch.float32, f"Image is {self.outputs.dtype}, should be float32"
         assert str(self.outputs.device) == str(self.device), f"Image is on {self.outputs.device}, should be {self.device}"
@@ -75,7 +75,7 @@ class ImageCPPN(CPPN):
         raise NotImplementedError("get_image_data_serial is not implemented")
         # TODO: would be necessary for recurrent networks
 
-    def forward(self, inputs=None, channel_first=True, act_mode='node'):
+    def forward(self, inputs=None, channel_first=True, act_mode='node', use_graph=False):
         """Evaluate the network to get output data in parallel
             Extra inputs are (batch_size, num_extra_inputs)
         """
@@ -86,7 +86,8 @@ class ImageCPPN(CPPN):
         # evaluate CPPN
         self.outputs = super().forward(inputs=inputs,
                                         channel_first=channel_first,
-                                        act_mode=act_mode)
+                                        act_mode=act_mode,
+                                        use_graph=use_graph)
 
        
         if self.normalize_outputs:
@@ -115,12 +116,8 @@ class ImageCPPN(CPPN):
             # assume output is HSL and convert to RGB
             self.outputs = hsl2rgb_torch(self.outputs)
         
-    def __call__(self, inputs=None, force_recalculate=False, channel_first=True):
-        return self.get_image(
-                            inputs=inputs,
-                            force_recalculate=force_recalculate,
-                            channel_first=channel_first
-                            )
+    def __call__(self, *args, **kwargs):
+        return self.get_image(*args, **kwargs)
     
     
 if __name__ == '__main__':

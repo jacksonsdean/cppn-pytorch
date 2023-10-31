@@ -156,16 +156,31 @@ def get_incoming_connections(individual, node):
     return list(filter(lambda x, n=node: x.key[1] == n.id,
                individual.enabled_connections()))  # cxs that end here
 
-def get_incoming_connections_weights(individual, node):
-    """Given an individual and a node, returns the connections in individual that end at the node"""
-    cxs = list(filter(lambda x, n=node: x.key[1] == n.id, individual.enabled_connections())) 
-    if len(cxs) == 0:
-        return None, None
-    weights = torch.stack([cx.weight for cx in cxs])#.to(individual.device)
-    inputs = torch.stack([individual.node_genome[c.key[0]].outputs for c in cxs], dim=-1)#.to(individual.device)
+def cx_ids_to_inputs(required_cxs, node_genome):
+    inputs = torch.stack([node_genome[c.key[0]].outputs for c in required_cxs], dim=-1)#.to(individual.device)
+    weights = torch.stack([cx.weight for cx in required_cxs])#.to(individual.device)
+    return inputs, weights
 
+def collect_connections(individual, node_id):
+    required_cxs = set()
+    
+    for cx in individual.connection_genome.values():
+        if cx.enabled and cx.key[1] == node_id: #and cx.key[0] in required_nodes:
+            required_cxs.add(cx)
+    
+    return required_cxs
+
+def get_incoming_connections_weights(individual, node_id):
+    """Given an individual and a node, returns the connections in individual that end at the node"""
+    required_cxs = collect_connections(individual, node_id)
+    
+    if len(required_cxs) == 0:
+        return None, None
+    
+    weights, inputs = cx_ids_to_inputs(required_cxs, individual.node_genome)
     # weights shape is (num_incoming)
-    # inputs shape is (batch, num_incoming, ...)
+    # inputs shape is (num_incoming, h, w)
+
     return inputs, weights
 
 def group_incoming_by_fn(inputs, weights, nodes, max_num_incoming) -> dict:

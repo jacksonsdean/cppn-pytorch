@@ -166,6 +166,8 @@ class CPPN(nn.Module):
         
         self.color_mode = config.color_mode
         
+        self.graph = {}
+        
 
     def get_new_node_id(self):
         """Returns a new node id`."""
@@ -186,7 +188,7 @@ class CPPN(nn.Module):
         
     def vis(self, fname='cppn_graph'):
         """Visualize the CPPN."""
-        make_dot(self.outputs).render(fname, format="pdf")
+        make_dot(self.outputs, show_attrs=True, show_saved=True).render(fname, format="pdf")
         
     def initialize_node_genome(self, config):
         """Initializes the node genome."""
@@ -533,6 +535,8 @@ class CPPN(nn.Module):
             self.update_node_layers()
             self.disable_invalid_connections(config)
             
+        self.graph = {}
+            
             
         self.outputs = None # reset the image
         if hasattr(self, 'aot_fn'):
@@ -697,6 +701,7 @@ class CPPN(nn.Module):
                 node.layer = layer_index + 1
             max_layer = max(max_layer, layer_index + 1)
             
+        self.graph = {}
         # for _, node in self.output_nodes().items():
         #     node.layer = max_layer + 1
          
@@ -746,7 +751,7 @@ class CPPN(nn.Module):
             node.outputs = torch.zeros(shape, device=self.device)
 
  
-    def forward(self, inputs=None, channel_first=True, act_mode='node'):
+    def forward(self, inputs=None, channel_first=True, act_mode='node', use_graph=False):
         res_h, res_w = inputs.shape[0], inputs.shape[1]
         node_shape = (res_h, res_w)
         
@@ -763,7 +768,7 @@ class CPPN(nn.Module):
 
         # iterate over layers
         for layer in layers:
-            Xs, Ws, nodes, Fns = [], [], [], []
+            Xs, Ws, nodes= [], [], []
             for node_index, node_id in enumerate(layer):
                 # iterate over nodes in layer
                 node = self.node_genome[node_id] # the current node
@@ -774,7 +779,15 @@ class CPPN(nn.Module):
                     weights = torch.ones((1), dtype=dtype, device=self.device)
                 else:
                     # find incoming connections and activate
-                    X, weights = get_incoming_connections_weights(self, node)
+                    if use_graph and node_id in self.graph.keys():
+                        required_cxs = self.graph[node_id] # use cached
+                        X, weights = cx_ids_to_inputs(required_cxs, self.node_genome)
+                    else:
+                        required_cxs = collect_connections(self, node_id)
+                        self.graph[node_id] = required_cxs 
+                        
+                    X, weights = cx_ids_to_inputs(required_cxs, self.node_genome)
+                        
                     # X shape = (num_incoming, res_h, res_w)
                     if X is None:
                         X = torch.zeros((res_h, res_w), dtype=dtype, device=self.device)
@@ -820,10 +833,6 @@ class CPPN(nn.Module):
         assert str(self.outputs.device )== str(self.device), f"Output is on {self.outputs.device}, should be {self.device}"
         assert self.outputs.dtype == torch.float32, f"Output is {self.outputs.dtype}, should be float32"
     
-        # reshape the outputs to image shape
-        # if not len(self.color_mode)>2:
-            # self.outputs  = torch.reshape(self.outputs, (res_h, res_w))
-        
         return self.outputs
     
 
@@ -836,6 +845,7 @@ class CPPN(nn.Module):
     
     
     def discard_grads(self):
+        return
         for _, cx in self.connection_genome.items():
             # check nan
             if isinstance(cx.weight, float):
@@ -945,6 +955,7 @@ class CPPN(nn.Module):
         
         child.set_id(id)
         child.age = 0
+        child.graph = {}
         
         if cpu:
             child.to('cpu')
