@@ -961,13 +961,12 @@ class CPPN(nn.Module):
         child = torch.load(buffer)
         del buffer
         
-        return child
         
         
-        child.connection_genome = nn.ModuleDict({key: copy.copy(cx) for key, cx in self.connection_genome.items()})
-        child.node_genome = nn.ModuleDict({key: copy.copy(node) for key, node in self.node_genome.items()})
-        # load_state_dict:
-        child.load_state_dict(self.state_dict())
+        # child.connection_genome = nn.ModuleDict({key: copy.copy(cx) for key, cx in self.connection_genome.items()})
+        # child.node_genome = nn.ModuleDict({key: copy.copy(node) for key, node in self.node_genome.items()})
+        # # load_state_dict:
+        # child.load_state_dict(self.state_dict())
         
         # for n in child.node_genome.values():
         #     n.bias = torch.tensor(n.bias.item(), dtype=dtype, device=child.device)
