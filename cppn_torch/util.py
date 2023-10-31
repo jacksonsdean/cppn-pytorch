@@ -43,9 +43,10 @@ def visualize_network(individual, config, sample_point=None, color_mode="L", vis
     plt.subplots_adjust(left=0, bottom=0, right=1.25, top=1.25, wspace=0, hspace=0)
 
     for i, fn in enumerate([node.activation for node in individual.node_genome.values()]):
-        if isinstance(fn, nn.Conv2d):
-            fn.__name__ = "Conv2d"
+        if not hasattr(fn, '__name__'):
+            fn.__name__ =  str(type(fn))
         function_colors[fn.__name__] = colors[i]
+        
     function_colors["identity"] = colors[0]
 
     fixed_positions={}
@@ -93,7 +94,8 @@ def visualize_network(individual, config, sample_point=None, color_mode="L", vis
                             label=node_labels, node_shape=shape, nodelist=this_nodes)
 
     edge_labels = {}
-    for key, cx in connections:
+    for _, cx in connections:
+        key = cx.key_tuple
         if key[0] not in nodes.keys() or key[1] not in nodes.keys():
             continue
         w = cx.weight.item()

@@ -16,7 +16,7 @@ import networkx as nx
 import logging
 from torch import nn
 from functorch.compile import compiled_function, draw_graph, aot_function
-from cppn_torch.activation_functions import identity
+from cppn_torch.activation_functions import IdentityActivation
 import cppn_torch.activation_functions as af
 from cppn_torch.graph_util import *
 # from cppn_torch.config import CPPNConfig as Config
@@ -118,8 +118,8 @@ class CPPN(nn.Module):
         self.device = config.device
         self.outputs = None
         self.normalize_outputs = config.normalize_outputs # todo unused in CPPN
-        self.node_genome = {}
-        self.connection_genome = {}
+        self.node_genome = nn.ModuleDict()
+        self.connection_genome = nn.ModuleDict()
         self.id = type(self).get_id()
         
         self.reconfig(config, nodes, connections)
@@ -152,10 +152,12 @@ class CPPN(nn.Module):
         if nodes is None:
             self.initialize_node_genome(config)
         else:
+            assert isinstance(nodes, nn.ModuleDict)
             self.node_genome = nodes
         if connections is None:
             self.initialize_connection_genome(config)
         else:
+            assert isinstance(connections, nn.ModuleDict)
             self.connection_genome = connections
         
         self.disable_invalid_connections(config)
@@ -175,11 +177,11 @@ class CPPN(nn.Module):
             if self.node_genome == {}:
                 return 0
             if self.node_genome is not None:
-                type(self).node_indexer = count(max(list(self.node_genome)) + 1)
+                type(self).node_indexer = count(max([int(k) for k in self.node_genome.keys()]) + 1)
             else:
-                type(self).node_indexer = count(max(list(self.node_genome)) + 1)
+                type(self).node_indexer = count(max([int(k) for k in self.node_genome.keys()]) + 1)
 
-        new_id = next(type(self).node_indexer)
+        new_id = str(next(type(self).node_indexer))
         assert new_id not in self.node_genome.keys()
         return new_id
     
@@ -203,8 +205,8 @@ class CPPN(nn.Module):
         
         # Input nodes:
         for idx in range(n_in):
-            fn = identity if not config.allow_input_activation_mutation else random_choice(config.activations)
-            new_node = Node(-(1+idx), fn, NodeType.INPUT, 0, config.node_agg, self.device, grad=config.with_grad)
+            fn = IdentityActivation if not config.allow_input_activation_mutation else random_choice(config.activations)
+            new_node = Node(f"{-(1+idx)}", fn, NodeType.INPUT, 0, config.node_agg, self.device, grad=config.with_grad)
             self.node_genome[new_node.key] = new_node
             
         # Output nodes:
@@ -213,13 +215,13 @@ class CPPN(nn.Module):
                 output_fn = random_choice(config.activations)
             else:
                 output_fn = config.output_activation
-            new_node = Node(-(1+idx), output_fn, NodeType.OUTPUT, output_layer_idx, config.node_agg, self.device, grad=config.with_grad)
+            new_node = Node(f"{-(1+idx)}", output_fn, NodeType.OUTPUT, output_layer_idx, config.node_agg, self.device, grad=config.with_grad)
             self.node_genome[new_node.key] = new_node
         
         # the rest are hidden:
         for hidden_layer_idx, layer_size in enumerate(n_hidden):
             for idx in range(layer_size):
-                new_node = Node(self.get_new_node_id(), random_choice(config.activations),
+                new_node = Node(f"{self.get_new_node_id()}", random_choice(config.activations),
                                 NodeType.HIDDEN, 1+hidden_layer_idx, config.node_agg, self.device, grad=config.with_grad)
                 self.node_genome[new_node.key] = new_node
 
@@ -237,7 +239,7 @@ class CPPN(nn.Module):
             for from_node in self.get_layer(layer_idx):
                 for to_node in self.get_layer(layer_idx+1):
                     new_cx = Connection(
-                        (from_node.id, to_node.id), self.random_weight(False, std))
+                        f"{from_node.id},{to_node.id}", self.random_weight(False, std))
                     self.connection_genome[new_cx.key] = new_cx
                     if torch.rand(1)[0] > config.init_connection_probability:
                         new_cx.enabled = False
@@ -247,7 +249,7 @@ class CPPN(nn.Module):
             for from_node in self.get_layer(0):
                 for to_node in self.get_layer(output_layer_idx):
                     new_cx = Connection(
-                        (from_node.id, to_node.id), self.random_weight(False, std))
+                         f"{from_node.id},{to_node.id}", self.random_weight(False, std))
                     self.connection_genome[new_cx.key] = new_cx
                     if torch.rand(1)[0] > config.init_connection_probability:
                         new_cx.enabled = False
@@ -262,7 +264,8 @@ class CPPN(nn.Module):
         required_cxs = set()
         for node_id in required_nodes:
             for cx in self.connection_genome.values():
-                if cx.enabled and cx.key[1] == node_id and cx.key[0] in required_nodes:
+                key = cx.key.split(',')
+                if cx.enabled and key[1] == node_id and key[0] in required_nodes:
                     required_cxs.add(cx.key)
         
         for cx in self.connection_genome.values():
@@ -295,10 +298,11 @@ class CPPN(nn.Module):
     
         
     def serialize(self):
+        return
         # del type(self).constant_inputs
         type(self).constant_inputs = None
         if self.outputs is not None:
-            self.outputs = self.outputs.cpu().numpy().tolist() if\
+            self.outputs = self.outputs.detach().cpu().numpy().tolist() if\
                 isinstance(self.outputs, torch.Tensor) else self.outputs
         for _, node in self.node_genome.items():
             node.serialize()
@@ -317,7 +321,7 @@ class CPPN(nn.Module):
         
     def to_json(self):
         """Converts the CPPN to a json dict."""
-
+        return {}
         self.serialize()
         # img = json.dumps(self.outputs) if self.outputs is not None else None
         # make copies to keep the CPPN intact
@@ -548,7 +552,11 @@ class CPPN(nn.Module):
         invalid = []
         for key, connection in self.connection_genome.items():
             if connection.enabled:
-                if not is_valid_connection(self.node_genome, self.connection_genome, connection.key, config, warn=True):
+                if not is_valid_connection(self.node_genome,
+                                           [k.split(',') for k in self.connection_genome.keys()],
+                                           key.split(','),
+                                           config,
+                                           warn=True):
                     invalid.append(key)
         for key in invalid:
             del self.connection_genome[key]
@@ -563,8 +571,12 @@ class CPPN(nn.Module):
             if from_node.layer >= to_node.layer:
                 continue  # don't allow recurrent connections
             # look to see if this connection already exists
-            existing_cx = self.connection_genome.get((from_node.id, to_node.id))
-
+            key = f"{from_node.id},{to_node.id}"
+            if key in self.connection_genome.keys():
+                existing_cx = self.connection_genome[key]
+            else:
+                existing_cx = None
+            
             # if it does exist and it is disabled, there is a chance to reenable
             if existing_cx is not None:
                 if not existing_cx.enabled:
@@ -574,9 +586,13 @@ class CPPN(nn.Module):
                 continue # don't add more than one connection
 
             # else if it doesn't exist, check if it is valid
-            if is_valid_connection(self.node_genome,  self.connection_genome, (from_node.id, to_node.id), config):
+            # if is_valid_connection(self.node_genome,  self.connection_genome, (from_node.id, to_node.id), config):
+            if is_valid_connection(self.node_genome,
+                                           [k.split(',') for k in self.connection_genome.keys()],
+                                           key.split(','),
+                                           config):
                 # valid connection, add
-                new_cx = Connection((from_node.id, to_node.id), self.random_weight())
+                new_cx = Connection(key, self.random_weight(False, config.weight_init_std))
                 assert new_cx.key not in self.connection_genome.keys(),\
                     "CX already exists: {}".format(new_cx.key)
                 self.connection_genome[new_cx.key] = new_cx
@@ -616,12 +632,13 @@ class CPPN(nn.Module):
         # new node is given a weight of one and the connection between
         # the new node and the last node in the chain
         # is given the same weight as the connection being split
+        old_cx_key = old_connection.key_tuple
         new_cx_1 = Connection(
-            (old_connection.key[0], new_node.id), torch.tensor(1.0, device=self.device, dtype=dtype, requires_grad=False))
+            f"{old_cx_key[0]},{new_node.id}", torch.tensor(1.0, device=self.device, dtype=dtype, requires_grad=False))
         assert new_cx_1.key not in self.connection_genome.keys()
         self.connection_genome[new_cx_1.key] = new_cx_1
 
-        new_cx_2 = Connection((new_node.id, old_connection.key[1]),
+        new_cx_2 = Connection(f"{new_node.id},{old_cx_key[1]}",
             old_connection.weight)
         assert new_cx_2.key not in self.connection_genome.keys()
         self.connection_genome[new_cx_2.key] = new_cx_2
@@ -642,7 +659,7 @@ class CPPN(nn.Module):
         node_id_to_remove = random_choice([n.id for n in hidden], 1, False)
 
         for key, cx in list(self.connection_genome.items())[::-1]:
-            if node_id_to_remove in cx.key:
+            if node_id_to_remove in cx.key_tuple:
                 del self.connection_genome[key]
         for key, node in list(self.node_genome.items())[::-1]:
             if node.id == node_id_to_remove:
@@ -660,14 +677,14 @@ class CPPN(nn.Module):
                 del self.connection_genome[cx.key]
                 removed += 1
         for _ in range(config.min_pruned - removed):
-            min_weight_key = min(self.connection_genome, key=lambda k: self.connection_genome[k].weight)
+            min_weight_key = min(self.connection_genome, key=lambda k: self.connection_genome[k].weight.item())
             removed += 1
             del self.connection_genome[min_weight_key]
        
         # remove nodes with no connections
         all_keys = []
-        all_keys.extend([cx.key[0] for cx in self.connection_genome.values()])
-        all_keys.extend([cx.key[1] for cx in self.connection_genome.values()])
+        all_keys.extend([cx.key.split(',')[0] for cx in self.connection_genome.values()])
+        all_keys.extend([cx.key.split(',')[1] for cx in self.connection_genome.values()])
 
         for node in list(self.node_genome.values())[::-1]:
             if node.id not in all_keys:
@@ -702,8 +719,6 @@ class CPPN(nn.Module):
             max_layer = max(max_layer, layer_index + 1)
             
         self.graph = {}
-        # for _, node in self.output_nodes().items():
-        #     node.layer = max_layer + 1
          
 
     def get_layer(self, layer_index):
@@ -926,24 +941,40 @@ class CPPN(nn.Module):
             json.dump(json_, f, indent=4)
 
 
-    def __copy__(self):
-        return self.clone()
+    # def __copy__(self):
+        # return self.clone()
 
 
     def clone(self, config, cpu=False, new_id=False):
         """ Create a copy of this genome. """
+        
         id = self.id if (not new_id) else type(self).get_id()
 
-        child = type(self)(config, {}, {})
-        child.connection_genome = {key: cx.copy() for key, cx in self.connection_genome.items()}        
-        child.node_genome = {key: node.copy() for key, node in self.node_genome.items()}
+        child = type(self)(config, nn.ModuleDict(), nn.ModuleDict())
         
-        for n in child.node_genome.values():
-            n.bias = torch.tensor(n.bias.item(), dtype=dtype, device=child.device)
+        import io
+        buffer = io.BytesIO()
+        torch.save(self, buffer) #<--- model is some nn.module
+
+        # read from buffer
+        buffer.seek(0) #<--- must see to origin every time before reading
+        child = torch.load(buffer)
+        del buffer
         
-        child.update_node_layers()
-        for cx in child.connection_genome.values():
-            cx.weight = torch.tensor(cx.weight.item(), dtype=dtype, device=self.device) # require prepare_optimizer() again
+        return child
+        
+        
+        child.connection_genome = nn.ModuleDict({key: copy.copy(cx) for key, cx in self.connection_genome.items()})
+        child.node_genome = nn.ModuleDict({key: copy.copy(node) for key, node in self.node_genome.items()})
+        # load_state_dict:
+        child.load_state_dict(self.state_dict())
+        
+        # for n in child.node_genome.values():
+        #     n.bias = torch.tensor(n.bias.item(), dtype=dtype, device=child.device)
+        
+        # child.update_node_layers()
+        # for cx in child.connection_genome.values():
+        #     cx.weight = torch.tensor(cx.weight.item(), dtype=dtype, device=self.device) # require prepare_optimizer() again
         
         if new_id:
             child.parents = (self.id, self.id)
@@ -965,17 +996,17 @@ class CPPN(nn.Module):
         
         return child
     
-    def to(self, device):
-        """Moves the CPPN to the given device (in-place)."""
-        if isinstance(device, str):
-            device = torch.device(device)
-        # if self.device == device:
-            # return
-        self.device = device
-        for key, node in self.node_genome.items():
-            node.to(device)
-        for key, cx in self.connection_genome.items():
-            cx.to(device)
+    # def to(self, device):
+    #     """Moves the CPPN to the given device (in-place)."""
+    #     if isinstance(device, str):
+    #         device = torch.device(device)
+    #     # if self.device == device:
+    #         # return
+    #     self.device = device
+    #     for key, node in self.node_genome.items():
+    #         node.to(device)
+    #     for key, cx in self.connection_genome.items():
+    #         cx.to(device)
                 
 
     def __call__(self, *args, **kwargs):
@@ -998,9 +1029,17 @@ if __name__== "__main__":
     
     import matplotlib.pyplot as plt
     visualize_network(cppn, c)
-    plt.show()
     
     
     
     plt.imshow(outputs.detach().cpu().numpy(), cmap='gray')
     plt.show()
+
+
+    child = cppn.clone(c)
+    visualize_network(child, c)
+    
+    outputs = child(inputs, channel_first=False)
+    plt.imshow(outputs.detach().cpu().numpy(), cmap='gray')
+    plt.show()        
+    

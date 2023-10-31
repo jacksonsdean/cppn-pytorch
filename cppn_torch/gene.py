@@ -2,6 +2,7 @@ from enum import IntEnum
 import json
 from typing import Callable
 import torch
+from torch import nn
 from copy import deepcopy
 from cppn_torch.activation_functions import identity
 
@@ -13,10 +14,13 @@ class NodeType(IntEnum):
     OUTPUT = 1
     HIDDEN = 2
 
-class Gene(object):
+class Gene(nn.Module):
     """Represents either a node or connection in the CPPN"""
     def __init__(self, key=None) -> None:
-        pass
+        super().__init__()
+        self.key_ = key
+        assert isinstance(key, str), f"key must be a string, not {type(key)}"
+        
     def copy(self,deep=False):
         new_gene = self.__class__(key=self.key)
         for name, value in self._gene_attributes:
@@ -67,9 +71,10 @@ class Node(Gene):
     @staticmethod
     def empty():
         """Returns an empty node. Default activation function is identity."""
-        return Node(0, identity, NodeType.HIDDEN, 0)
+        return Node("0", identity, NodeType.HIDDEN, 0)
 
     def __init__(self, key, activation=None, _type=2, _layer=999, node_agg="sum", device="cpu", grad=True) -> None:
+        super().__init__(key)
         self.device = device
         self.activation = activation
         self.set_activation(activation)
@@ -79,9 +84,9 @@ class Node(Gene):
         self.sum_inputs = None
         self.outputs = None
         self.agg = node_agg
-        self.bias = torch.zeros(1, device=device, requires_grad=grad)
+        self.bias = nn.Parameter(torch.zeros(1, device=device, requires_grad=grad))
+        # self.bias = torch.zeros(1, device=device, requires_grad=grad)
         self.activation_params = []
-        super().__init__()
     
     @property
     def key(self):
@@ -91,15 +96,9 @@ class Node(Gene):
         return [('activation', self.activation), ('type', self.type), ('bias', self.bias)]
     
     def set_activation(self, activation):
-        self.activation = activation
+        self.activation = activation()
         self.activation_params = []
-        if activation == torch.nn.Conv2d:
-            # keep dims same (h,w) -> (h,w)
-            self.activation = activation(in_channels=1, out_channels=1, kernel_size=3, padding=1, bias=False)
-            # self.activation.weight.data.fill_(1.0)
-            self.activation = self.activation.to(self.device)
-            self.activation_params = list(self.activation.parameters())
-            self.activation.__name__ = "Conv2d"
+
    
     def params(self):
         return [self.bias] + self.activation_params
@@ -150,14 +149,17 @@ class Node(Gene):
 
     def serialize(self):
         """Makes the node serializable."""
+        return 
         self.type = self.type.value if isinstance(self.type, NodeType) else self.type
         self.id = int(self.id)
         self.layer = int(self.layer)
         self.sum_inputs = None
         self.outputs = None
-        self.bias = self.bias.item() if isinstance(self.bias, torch.Tensor) else self.bias
+        # self.bias = self.bias.item() if isinstance(self.bias, torch.Tensor) else self.bias
         self.device = str(self.device)
-        if isinstance(self.activation, Callable):
+        if not hasattr(self.activation, '__name__'):
+            self.activation = self.activation.__class__.__name__
+        else:
             self.activation = self.activation.__name__
     
     def deserialize(self):
@@ -205,19 +207,23 @@ class Connection(Gene):
     i.e. 2->5 and 2->5 have same innovation number, regardless of individual
     """
     def __init__(self, key, weight = None, enabled = True) -> None:
+        super().__init__(key)
+        
         # Initialize
-        self.key_ = key
-        self.weight = weight
+        if not isinstance(weight, torch.Tensor):
+            weight = torch.tensor(weight)
+        self.weight = nn.Parameter(weight)
         # self.innovation = Connection.get_innovation(key)
         self.enabled = enabled
         # self.is_recurrent = to_node.layer < from_node.layer
         self.is_recurrent = False # TODO
-        super().__init__()
         
     @property
     def key(self):
-        assert type(self.key_) is tuple, "key is not a tuple"
         return self.key_
+    @property
+    def key_tuple(self):
+        return self.key_.split(',')
     @property
     def from_node(self):
         return self.key_[0]
@@ -248,17 +254,17 @@ class Connection(Gene):
     @staticmethod
     def create_from_json(json_dict):
         """Constructs a connection from a json dict or string."""
-        i = Connection((-1,-1), 0)
+        i = Connection(str((-1,-1)), 0)
         i.from_json(json_dict)
         i.weight = torch.tensor(i.weight)
         return i
 
-    def __str__(self):
-        return self.__repr__()
-    def __repr__(self):
-        return f"([{self.key[0]}->{self.key[1]}] "+\
-            f"W:{self.weight.item():3f} E:{int(self.enabled)} R:{int(self.is_recurrent)})"
+    # def __str__(self):
+        # return self.__repr__()
+    # def __repr__(self):
+        # return f"([{self.key.split(',')[0]}->{self.key.split(',')[1]}] "+\
+            # f"W:{self.weight.item():3f} E:{int(self.enabled)} R:{int(self.is_recurrent)})"
     
-    def to(self, device):
-        self.weight = self.weight.to(device)
-        return self
+    # def to(self, device):
+        # self.weight = self.weight.to(device)
+        # return self

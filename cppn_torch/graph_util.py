@@ -23,8 +23,6 @@ def is_valid_connection(nodes, connections, key:tuple, config, warn:bool=False):
     from_node, to_node = key
     from_node, to_node = nodes[from_node], nodes[to_node]
     
-    connections = list(connections.keys())
-    
     # if from_node.layer == to_node.layer:
     #     if warn:
     #         logging.warning(f"Connection from node {from_node.id} (layer:{from_node.layer}) to node {to_node.id} (layer:{to_node.layer}) is invalid because they are on the same layer.")
@@ -139,7 +137,7 @@ def get_ids_from_individual(individual):
     """
     inputs = list(individual.input_nodes().keys())
     outputs = list(individual.output_nodes().keys())
-    connections = [c.key
+    connections = [c.key.split(',')
                    for c in individual.enabled_connections()]
                 #    for c in individual.connection_genome.values()]
     return inputs, outputs, connections
@@ -157,7 +155,7 @@ def get_incoming_connections(individual, node):
                individual.enabled_connections()))  # cxs that end here
 
 def cx_ids_to_inputs(required_cxs, node_genome):
-    inputs = torch.stack([node_genome[c.key[0]].outputs for c in required_cxs], dim=-1)#.to(individual.device)
+    inputs = torch.stack([node_genome[c.key.split(',')[0]].outputs for c in required_cxs], dim=-1)#.to(individual.device)
     weights = torch.stack([cx.weight for cx in required_cxs])#.to(individual.device)
     return inputs, weights
 
@@ -165,7 +163,7 @@ def collect_connections(individual, node_id):
     required_cxs = set()
     
     for cx in individual.connection_genome.values():
-        if cx.enabled and cx.key[1] == node_id: #and cx.key[0] in required_nodes:
+        if cx.enabled and cx.key.split(',')[1] == node_id: #and cx.key[0] in required_nodes:
             required_cxs.add(cx)
     
     return required_cxs
@@ -613,7 +611,7 @@ def feed_forward_layers(individual):
                 has_input = True
                 break
     
-    # add dangling inputs to the input set
+    # add dangling inputs to the 
     s = s.union(dangling_inputs)
     
     while 1:

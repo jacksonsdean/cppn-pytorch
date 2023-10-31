@@ -122,3 +122,31 @@ def tanh_softsign(x):
 def tanh_softsign_norm(x):
     return 0.5+tanh_softsign(x)
 
+
+
+class SinActivation(torch.nn.Module):
+    def __init__(self):
+        super(SinActivation, self).__init__()
+        return
+    def forward(self, x):
+        return torch.sin(x)
+
+class IdentityActivation(torch.nn.Module):
+    def __init__(self):
+        super(IdentityActivation, self).__init__()
+        return
+    def forward(self, x):
+        return x
+
+class ConvActivation(torch.nn.Module):
+    def __init__(self):
+        super(ConvActivation, self).__init__()
+        self.conv = torch.nn.Conv2d(1, 1, 5, padding=2, bias=False)
+        self.activation = torch.nn.ReLU()
+        return
+    def forward(self, x):
+        return self.activation(self.conv(x))
+
+# TODO: kernels, ie kernel_sharpen, kernel_blur, kernel_edge, kernel_emboss
+
+

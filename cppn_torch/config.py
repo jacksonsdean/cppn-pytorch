@@ -263,7 +263,7 @@ class CPPNConfig:
         """Converts the configuration to a json string."""
         self.fns_to_strings()
         json_string = json.dumps(self.__dict__, sort_keys=True, indent=4)
-        self.strings_to_fns()
+        # self.strings_to_fns()
         return json_string
 
 
