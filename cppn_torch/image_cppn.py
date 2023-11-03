@@ -3,7 +3,6 @@ from typing import List
 
 import torch
 from torch import nn
-from functorch.compile import compiled_function, draw_graph, aot_function
 from typing import Optional, TypeVar, Union
 
 from cppn_torch.config import CPPNConfig as Config
