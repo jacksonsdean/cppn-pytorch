@@ -15,7 +15,6 @@ from copyreg import dispatch_table
 import networkx as nx
 import logging
 from torch import nn
-from functorch.compile import compiled_function, draw_graph, aot_function
 from cppn_torch.activation_functions import IdentityActivation
 import cppn_torch.activation_functions as af
 from cppn_torch.graph_util import *
